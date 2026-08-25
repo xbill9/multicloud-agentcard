@@ -51,15 +51,38 @@ Neither stack signs its card. Neither declares a security scheme. Both leave
 `provider` and `iconUrl` empty. Those are notes, not defects — and they are the
 answer to "what do these runtimes have in common", which is also worth having.
 
-### What has *not* been measured yet
+### The deployed three, measured 2026-08-25
 
-**The three deployed agents.** `research-gcp` on Cloud Run, the Strands agent
-on Bedrock AgentCore, and the Agent Framework agent on Container Apps have not
-been fetched from this repo. The parent project reaches them from a coordinator
-running *on Cloud Run*, which can mint workload OIDC tokens for an arbitrary
-audience; this is a CLI, and a workstation has no metadata server. See
-**Reaching the deployed three**, below. Until that runs, every card claim here
-is about two local specimens and says so.
+Two of them, from a workstation, with the third recorded as a denial row. The
+gap below turned out to be narrower than it read: only the *federated* path
+needs a metadata server, and two of the three clouds will accept a credential a
+laptop can already produce. See **Reaching the deployed three** for what that
+does and does not prove.
+
+```
+run 8c201b95f349  2/3 card(s)  5126ms
+
+  gcp    200  1.0         1533B  gcloud-id-token   1 err  2 warn
+  aws    200  hybrid      2109B  aws-sigv4-local   0 err  2 warn
+  azure  FAILED  authentication: 401 on /.well-known/agent-card.json
+```
+
+The full report is `docs/deployed-2026-08-25.md`, and the findings are written
+up in `docs/DISCOVERY-FINDINGS.md`. The headline: **the two shapes reported
+above off the local specimens reproduce on the deployed pair** — Cloud Run/ADK
+serves a 1.0-shaped card, AgentCore a hybrid one declaring `0.3` — and ADK's
+`0.0.0.0:8080` bind address is still on the live card.
+
+### What has *still* not been measured
+
+**The Azure leg.** Container Apps returns 401 and its Entra app registration
+has not consented to the Azure CLI's client id, so `az account get-access-token`
+against it fails `AADSTS65001` before any card is fetched. It stays in the
+corpus as a denial row rather than a blank column.
+
+**Anything through the federated path.** Nothing here has yet fetched a card
+using the workload credentials the deployed coordinator actually uses, so no
+claim in this repo tests those trust policies.
 
 ---
 
@@ -188,8 +211,50 @@ The parent reaches them from a coordinator on Cloud Run:
 | → Azure | Entra Federated Identity Credential on `accounts.google.com` |
 
 All three start from a **workload** OIDC token minted at the GCE metadata
-server, and a workstation has none. Two ways forward, and they are not
-equivalent:
+server, and a workstation has none.
+
+### What a workstation can already reach (2026-08-25)
+
+Two of the three, with two modes added for it. Both are **weaker measurements**
+than the federated path and the report names the mode on every row so the two
+can never be read as the same result.
+
+| leg | workstation mode | what it proves | what it does not |
+|---|---|---|---|
+| → GCP | `gcloud-id-token` | the developer has `roles/run.invoker` | nothing about the coordinator's service account |
+| → AWS | `aws-sigv4-local` | `~/.aws/credentials` has `bedrock-agentcore:GetAgentCard` | nothing about the role trust policy |
+| → Azure | — | — | 401; see below |
+
+```bash
+agentcard fetch --peers-file peers.toml --save     # peers.toml is gitignored
+```
+
+Two measured details that make `gcloud-id-token` less obvious than it looks:
+
+- **A user account cannot pin the audience.** `gcloud auth print-identity-token
+  --audiences=<url>` is refused outright — *"Invalid account type for
+  `--audiences`. Requires valid service account."* So the token carries
+  `aud` = gcloud's own OAuth client id `32555940559.apps.googleusercontent.com`,
+  not the service URL.
+- **Cloud Run accepts it anyway.** The invoker check honours Google's
+  allowlisted CLI client id. The mode therefore proves IAM role membership and
+  **not** that any audience condition holds — which is exactly the confusion
+  `peers/auth.py` logs a warning about every time it falls back.
+
+`aws-sigv4-local` reuses the same `_sign_request` as the federated mode and
+swaps only the origin of the key. It is deliberately **not** in `KEYLESS_MODES`:
+it mints nothing, so it looks keyless, but what it reads off the disk is very
+often a static access key and it cannot tell which it got.
+
+**Azure is still shut.** Its Container App is configured
+`unauthenticatedClientAction: Return401` against app registration
+`be143e2d-…`, and minting a token for that audience from the CLI fails
+`AADSTS65001: the user or administrator has not consented`. Opening it means an
+admin consent grant on someone's tenant, or a client secret — the one mode in
+this repo that is not keyless. Neither is a thing to do quietly, so the leg
+stays a denial row.
+
+Two ways forward for the *federated* path, and they are not equivalent:
 
 1. **Run `agentcard fetch` on Cloud Run**, as the parent's coordinator does.
    Unchanged credentials, unchanged trust policies, and the cards it fetches
@@ -208,7 +273,7 @@ explicit mode so a peers file can configure this per peer.
 ## Testing
 
 ```bash
-python3 -m pytest -q      # 92 passed
+python3 -m pytest -q      # 110 passed
 ruff check .              # all checks passed
 ```
 

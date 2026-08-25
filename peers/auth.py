@@ -38,8 +38,10 @@ observable. Raise and log.
 Successful responses are logged without their token material.
 """
 
+import asyncio
 import hashlib
 import hmac
+import json
 import logging
 import os
 from collections.abc import Iterator
@@ -192,6 +194,117 @@ def _jwt_expiry(token: str) -> datetime:
         return datetime.now(UTC) + timedelta(minutes=5)
 
 
+class GcloudIdentity:
+    """Mints a Google ID token by shelling out to the ``gcloud`` CLI.
+
+    ``WorkloadIdentity`` needs a metadata server and a workstation has none,
+    which is the gap "Reaching the deployed three" in README.md describes. For
+    the GCP leg specifically that gap turned out to be narrower than it looked:
+    measured 2026-08-25 against the deployed Cloud Run agent, a plain
+    ``gcloud auth print-identity-token`` from a developer account is accepted
+    and returns the card. The AWS and Azure legs are untouched by this -- their
+    trust conditions pin the *subject* to the coordinator service account's
+    numeric ID, and a developer's token has a different ``sub``.
+
+    Two measured details that make this less obvious than it reads:
+
+    - **The audience cannot be pinned for a user account.**
+      ``--audiences=<url>`` is refused outright with "Invalid account type for
+      `--audiences`. Requires valid service account." So the token this mints
+      carries ``aud`` = gcloud's own OAuth client ID,
+      ``32555940559.apps.googleusercontent.com``, *not* the service URL that
+      ``GoogleIdTokenAuth`` was written to pass.
+    - **Cloud Run accepts it anyway.** The invoker check honours Google's
+      allowlisted CLI client ID rather than requiring ``aud`` to be the service
+      URL. The requested audience is therefore accepted and recorded here, but
+      it does not reach the token -- so this mode must never be read as
+      evidence that an audience condition holds. It is authorization by IAM
+      role membership, nothing more.
+
+    A service-account account *can* pin the audience, so the flag is passed
+    when it works and dropped, loudly, when gcloud refuses it.
+    """
+
+    def __init__(
+        self,
+        *,
+        executable: str | None = None,
+        timeout_s: float = 30.0,
+        account: str | None = None,
+    ) -> None:
+        self._executable = executable or os.getenv("GCLOUD_BINARY", "gcloud")
+        self._timeout_s = timeout_s
+        self._account = account or os.getenv("GCLOUD_ACCOUNT")
+        self._cache: dict[str, _CachedToken] = {}
+
+    async def _run(self, args: list[str]) -> tuple[int, str, str]:
+        process = await asyncio.create_subprocess_exec(
+            self._executable,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            out, err = await asyncio.wait_for(
+                process.communicate(), timeout=self._timeout_s
+            )
+        except TimeoutError:
+            process.kill()
+            raise
+        return process.returncode, out.decode().strip(), err.decode().strip()
+
+    async def id_token(self, audience: str) -> str:
+        cached = self._cache.get(audience)
+        if cached is not None and cached.usable:
+            return cached.value
+
+        boundary = f"gcloud identity mint (audience={audience})"
+        base = ["auth", "print-identity-token"]
+        if self._account:
+            base.append(f"--account={self._account}")
+
+        try:
+            code, token, err = await self._run([*base, f"--audiences={audience}"])
+            if code != 0 and "audiences" in err.lower():
+                # A user account cannot pin an audience. Say so once, at the
+                # boundary, rather than letting the caller believe the audience
+                # it asked for is the one in the token.
+                log.warning(
+                    "%s -> gcloud refused --audiences (%s); falling back to an "
+                    "un-audienced token. Its aud is gcloud's OAuth client ID, "
+                    "not %s -- Cloud Run accepts this by IAM role, and it is "
+                    "not evidence that an audience condition holds.",
+                    boundary,
+                    err.splitlines()[-1] if err else "no detail",
+                    audience,
+                )
+                code, token, err = await self._run(base)
+        except FileNotFoundError as exc:
+            raise _auth_error(
+                boundary,
+                f"{self._executable!r} is not on PATH. This mode shells out to "
+                "the gcloud CLI; install it and run `gcloud auth login`.",
+            ) from exc
+        except TimeoutError as exc:
+            raise _auth_error(
+                boundary, f"gcloud did not return within {self._timeout_s}s"
+            ) from exc
+
+        # The provider's own words, whole. Same rule as every other boundary in
+        # this module: a raised message is not an observable.
+        if code != 0 or not token:
+            log.error("%s -> exit %s: %s", boundary, code, err or "(no stderr)")
+            raise _auth_error(
+                boundary,
+                f"gcloud exited {code}: {err or 'no output'}. "
+                "Run `gcloud auth login` and check `gcloud auth list`.",
+            )
+        log.info("%s -> ok (%d byte token)", boundary, len(token))
+
+        self._cache[audience] = _CachedToken(token, _jwt_expiry(token))
+        return token
+
+
 class GoogleIdTokenAuth(httpx.Auth):
     """GCP -> GCP. The trivial leg: an ID token, and ``roles/run.invoker``.
 
@@ -200,13 +313,23 @@ class GoogleIdTokenAuth(httpx.Auth):
     control case that proves the seam works before the interesting legs use it.
     """
 
-    def __init__(self, audience: str, *, identity: WorkloadIdentity | None = None) -> None:
+    def __init__(
+        self,
+        audience: str,
+        *,
+        identity: "WorkloadIdentity | GcloudIdentity | None" = None,
+        mode: str = "google-id-token",
+    ) -> None:
         self._audience = audience
         self._identity = identity or WorkloadIdentity()
+        # Carried so the report can distinguish the two ways a bearer ID token
+        # gets minted. The wire format is identical; the principal is not, and
+        # `resolved_auth` is what a reader has to trust on that question.
+        self._mode = mode
 
     @property
     def mode(self) -> str:
-        return "google-id-token"
+        return self._mode
 
     def sync_auth_flow(self, request: httpx.Request) -> Iterator[httpx.Request]:
         raise RuntimeError("the mesh is async; use an httpx.AsyncClient")
@@ -420,6 +543,137 @@ class AwsSigV4Auth(httpx.Auth):
             raise _auth_error(boundary, _sts_detail(response))
 
         self._cache = _parse_sts_response(response.text, boundary)
+        return self._cache
+
+
+class AwsSigV4LocalAuth(httpx.Auth):
+    """SigV4 from the workstation's own AWS credentials, skipping STS entirely.
+
+    ``AwsSigV4Auth`` starts at the GCE metadata server, and a workstation has
+    none -- the gap "Reaching the deployed three" in README.md describes. This
+    mode exists to fetch a card from AgentCore from a laptop, and it is a
+    **different measurement**, not a workaround for the same one:
+
+    - The federated path proves that a *workload* OIDC token satisfies the role
+      trust policy. This proves only that whoever is configured in
+      ``~/.aws/credentials`` has ``bedrock-agentcore:GetAgentCard``.
+    - So a card fetched this way says nothing about whether the deployed
+      coordinator could fetch it. The mode name is carried into the report for
+      exactly that reason; do not read the two as interchangeable rows.
+
+    Everything downstream of the credential is shared with the federated mode:
+    the same ``_sign_request``, the same signed ``x-amzn-*`` headers. What is
+    being swapped here is the origin of the key, and nothing else.
+    """
+
+    requires_request_body = True
+
+    def __init__(
+        self,
+        *,
+        region: str,
+        service: str = "bedrock-agentcore",
+        extra_headers: dict[str, str] | None = None,
+        profile: str | None = None,
+        timeout_s: float = 15.0,
+    ) -> None:
+        self._region = region
+        self._service = service
+        self._extra_headers = extra_headers or {}
+        self._profile = profile
+        self._timeout_s = timeout_s
+        self._cache: _AwsCredentials | None = None
+
+    @property
+    def mode(self) -> str:
+        return "aws-sigv4-local"
+
+    def sync_auth_flow(self, request: httpx.Request) -> Iterator[httpx.Request]:
+        raise RuntimeError("the mesh is async; use an httpx.AsyncClient")
+
+    async def async_auth_flow(self, request: httpx.Request):
+        credentials = await self._credentials()
+        for name, value in self._extra_headers.items():
+            request.headers[name] = value
+        _sign_request(
+            request,
+            credentials=credentials,
+            region=self._region,
+            service=self._service,
+            now=datetime.now(UTC),
+            extra_signed_headers=tuple(self._extra_headers),
+        )
+        yield request
+
+    async def _credentials(self) -> "_AwsCredentials":
+        if self._cache is not None and self._cache.usable:
+            return self._cache
+
+        boundary = "aws local credentials"
+        key = os.getenv("AWS_ACCESS_KEY_ID")
+        secret = os.getenv("AWS_SECRET_ACCESS_KEY")
+        token = os.getenv("AWS_SESSION_TOKEN", "")
+        if key and secret:
+            # Static keys carry no expiry. Re-read them periodically anyway
+            # rather than caching forever, so an exported session token that
+            # does expire is not pinned for the life of the process.
+            self._cache = _AwsCredentials(
+                key, secret, token, datetime.now(UTC) + timedelta(minutes=5)
+            )
+            log.info("%s -> ok (from the environment)", boundary)
+            return self._cache
+
+        # No env keys: ask the CLI, which resolves profiles, SSO and the
+        # credentials file the same way every other AWS tool on the box does.
+        # Reimplementing that resolution here would be a second, subtly
+        # different answer to "which identity is this laptop".
+        args = ["configure", "export-credentials", "--format", "process"]
+        if self._profile:
+            args = ["--profile", self._profile, *args]
+        try:
+            process = await asyncio.create_subprocess_exec(
+                os.getenv("AWS_BINARY", "aws"),
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, err = await asyncio.wait_for(
+                process.communicate(), timeout=self._timeout_s
+            )
+        except FileNotFoundError as exc:
+            raise _auth_error(
+                boundary,
+                "no AWS_ACCESS_KEY_ID in the environment and the aws CLI is not "
+                "on PATH. Set the keys or install the CLI and run `aws configure`.",
+            ) from exc
+        except TimeoutError as exc:
+            raise _auth_error(
+                boundary, f"the aws CLI did not return within {self._timeout_s}s"
+            ) from exc
+
+        if process.returncode != 0:
+            # The provider's own words, at the boundary. Same rule as STS.
+            detail = err.decode().strip() or "(no stderr)"
+            log.error("%s -> exit %s: %s", boundary, process.returncode, detail)
+            raise _auth_error(
+                boundary, f"aws configure export-credentials exited {process.returncode}: {detail}"
+            )
+
+        try:
+            payload = json.loads(out.decode())
+        except json.JSONDecodeError as exc:
+            raise _auth_error(boundary, f"unreadable credential output: {out!r}") from exc
+
+        expiry = payload.get("Expiration")
+        self._cache = _AwsCredentials(
+            payload["AccessKeyId"],
+            payload["SecretAccessKey"],
+            payload.get("SessionToken", ""),
+            _parse_expiry(expiry, boundary)
+            if expiry
+            else datetime.now(UTC) + timedelta(minutes=5),
+        )
+        log.info("%s -> ok (via the aws CLI)", boundary)
         return self._cache
 
 
@@ -642,17 +896,25 @@ def _signing_key(secret: str, date_stamp: str, region: str, service: str) -> byt
 AUTH_MODES = (
     "none",
     "google-id-token",
+    "gcloud-id-token",
     "aws-sigv4",
+    "aws-sigv4-local",
     "entra-fic",
     "gcp-wif-aws",
     "entra-client-secret",
 )
 
-#: Modes that require no long-lived secret. ``entra-client-secret`` is the only
-#: one that does, and the distinction is reported per leg rather than inferred,
-#: because "which legs were keyless" is the claim this project has to back.
+#: Modes that require no long-lived secret. The distinction is reported per leg
+#: rather than inferred, because "which legs were keyless" is the claim this
+#: project has to back.
+#:
+#: Two omissions are deliberate. ``entra-client-secret`` obviously holds one.
+#: ``aws-sigv4-local`` is the subtle one: it mints nothing, so it *looks*
+#: keyless, but what it reads from ``~/.aws/credentials`` is very often a
+#: static access key -- precisely what this set exists to exclude. It cannot
+#: tell which it got, so it does not claim.
 KEYLESS_MODES = frozenset(
-    {"none", "google-id-token", "aws-sigv4", "entra-fic", "gcp-wif-aws"}
+    {"none", "google-id-token", "gcloud-id-token", "aws-sigv4", "entra-fic", "gcp-wif-aws"}
 )
 
 _AWS_ROOTED_MODES = frozenset({"gcp-wif-aws", "entra-client-secret"})
@@ -663,8 +925,8 @@ def _require(peer: str, mode: str, name: str) -> str:
     if not value:
         raise AdapterError(
             FailureKind.VALIDATION,
-            f"{peer} is configured with {name.rsplit('_', 1)[0]}"
-            f"_A2A_AUTH={mode} but {name} is unset",
+            f"{peer} is configured with {peer.upper()}_A2A_AUTH={mode} "
+            f"but {name} is unset",
         )
     return value
 
@@ -726,6 +988,29 @@ def credentials_for(
         # endpoint we dialled is the right default.
         audience = os.getenv(f"{prefix}_A2A_AUDIENCE") or _service_root(endpoint)
         return GoogleIdTokenAuth(audience, identity=identity)
+
+    if mode == "gcloud-id-token":
+        # Deliberately *not* folded into google-id-token. Both end up sending a
+        # bearer ID token, but they answer to different principals -- a
+        # developer account against a workstation CLI, versus the coordinator
+        # service account against a metadata server -- and the report has to be
+        # able to say which one fetched the card. See GcloudIdentity: the
+        # audience asked for here is not the audience in the token.
+        audience = os.getenv(f"{prefix}_A2A_AUDIENCE") or _service_root(endpoint)
+        return GoogleIdTokenAuth(
+            audience,
+            identity=GcloudIdentity(account=os.getenv(f"{prefix}_A2A_GCLOUD_ACCOUNT")),
+            mode="gcloud-id-token",
+        )
+
+    if mode == "aws-sigv4-local":
+        service = os.getenv(f"{prefix}_A2A_SIGNING_SERVICE", "bedrock-agentcore")
+        return AwsSigV4LocalAuth(
+            region=_require(peer, mode, f"{prefix}_A2A_REGION"),
+            service=service,
+            extra_headers=_agentcore_headers(prefix) if service == "bedrock-agentcore" else None,
+            profile=os.getenv(f"{prefix}_A2A_PROFILE"),
+        )
 
     if mode == "aws-sigv4":
         service = os.getenv(f"{prefix}_A2A_SIGNING_SERVICE", "bedrock-agentcore")

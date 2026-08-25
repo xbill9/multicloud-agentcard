@@ -5,13 +5,28 @@
 # Naming any peer here suppresses the built-in three. Add them back with
 # --builtin gcp (repeatable) if you want both.
 #
-# `auth` is one of: none, google-id-token, aws-sigv4, entra-fic, gcp-wif-aws,
-# entra-client-secret. Omit it and the peer falls back to <NAME>_A2A_AUTH in
-# the environment, which is how the built-in three are configured.
+# `auth` is one of: none, google-id-token, gcloud-id-token, aws-sigv4,
+# aws-sigv4-local, entra-fic, gcp-wif-aws, entra-client-secret. Omit it and the
+# peer falls back to <NAME>_A2A_AUTH in the environment, which is how the
+# built-in three are configured.
 #
-# Every mode except `none` needs a workload OIDC token minted at the GCE
-# metadata server. See "Reaching the deployed three" in README.md -- from a
-# workstation there is not one.
+# The federated modes -- google-id-token, aws-sigv4, entra-fic, gcp-wif-aws --
+# each need a workload OIDC token minted at the GCE metadata server, and a
+# workstation has none.
+#
+# Two modes exist for a workstation, and they measure something weaker:
+#
+#   gcloud-id-token   shells out to `gcloud auth print-identity-token`.
+#                     Proves the developer has roles/run.invoker. Note that a
+#                     user account cannot pin --audiences, so the token is
+#                     audienced to gcloud's OAuth client id and Cloud Run
+#                     accepts it by role -- never read a green row here as
+#                     evidence an audience condition held.
+#   aws-sigv4-local   signs with ~/.aws/credentials instead of STS web
+#                     identity. Proves that identity has GetAgentCard; says
+#                     nothing about the role trust policy. Not counted keyless.
+#
+# See "Reaching the deployed three" in README.md.
 
 [[peer]]
 name = "gcp"

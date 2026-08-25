@@ -145,3 +145,130 @@ green for a reason that stopped being true the moment the image was rebuilt.**
 is missing — a header that says `0.3` is a real client statement and is still
 rejected. Absent is not evidence of an old client; it is no evidence at all.
 
+
+
+---
+
+# Measured by this repo on the deployed three
+
+Everything below was fetched by `agentcard fetch --peers-file peers.toml` from
+a **workstation**, on **2026-08-25**, run `8c201b95f349`. Full report:
+`docs/deployed-2026-08-25.md`. Two of three peers answered; Azure is a denial
+row. Per `CLAUDE.md`, every claim here names the date it was true, because
+cards change without notice and without a version bump.
+
+The credential matters to how far these claims reach. GCP was fetched with a
+developer `gcloud` identity token and AWS with the workstation's own AWS
+credentials — **not** the federated workload path the deployed coordinator
+uses. What was measured is the *card*; what was not measured is the trust
+policy.
+
+## Finding: the two card shapes reproduce on the deployed pair (2026-08-25)
+
+The fork's own first-hour finding — ADK serving a 1.0-shaped card and `a2a-sdk`
+a hybrid one — was measured on local specimens, where it could have been an
+artefact of the specimen code. It is not. On the deployed agents:
+
+| peer | runtime | shape | `protocolVersion` at top level | per interface |
+|---|---|---|---|---|
+| gcp | Cloud Run / ADK `to_a2a` | `1.0` | absent | `1.0` |
+| aws | Bedrock AgentCore / a2a-sdk | `hybrid` | `0.3` | absent |
+
+So a client branching on `protocolVersion` still gets the wrong answer for both
+stacks against real deployments, in opposite directions. AgentCore's card also
+earns `version-shape-mismatch`: it declares `0.3` while carrying 1.0's
+`supportedInterfaces`.
+
+## Finding: ADK still advertises `0.0.0.0:8080` on a live Cloud Run card (2026-08-25)
+
+Finding 2 above was last confirmed on this repo's deployment on 2026-07-31.
+Re-measured today against `research-gcp`, unchanged:
+
+```
+ERR  gcp  bind-address-on-card: supportedInterfaces[0] advertises a loopback
+          address: http://0.0.0.0:8080
+WARN gcp  plaintext-url: supportedInterfaces[0] advertises http:// for a
+          remote agent: http://0.0.0.0:8080
+```
+
+A public HTTPS endpoint whose card routes clients to unroutable plaintext. It
+is the only error-severity defect on either card that is the *vendor's*, and
+the harness now catches it without anyone looking.
+
+## Finding: neither deployed card declares the auth it demands (2026-08-25)
+
+Both peers 401/403 without a credential, and both serve a card with no
+`securitySchemes`:
+
+```
+WARN gcp  undeclared-auth: card was fetched with gcloud-id-token and names no securitySchemes
+WARN aws  undeclared-auth: card was fetched with aws-sigv4-local and names no securitySchemes
+```
+
+The card is the thing a client reads to learn how to authenticate, and on both
+clouds it is silent about it. A client that discovers either agent learns
+nothing from the card about why its next request will be rejected. Neither card
+is signed, and neither declares `provider`, `documentationUrl` or `iconUrl` —
+notes, not defects, and the answer to "what do these runtimes have in common".
+
+## Finding: the two runtimes disagree about what a "skill" is (2026-08-25)
+
+The sharpest client-visible contrast in the run, and it is a `note`-level
+difference that no conformance check would flag:
+
+| peer | skill ids |
+|---|---|
+| gcp | `research_agent`, `research_agent-sub-agents`, `research_agent_gemini_research_agent_gemini`, `research_agent_gemini_research_agent_gemini-web_search` |
+| aws | `research_brief` |
+
+The same logical agent. ADK's `to_a2a()` **flattens its internal composition
+onto the card** — the agent, its sub-agent list, the sub-agent's model, and the
+sub-agent's tools each become a skill, with the tool's Python docstring as the
+description. AgentCore publishes one skill, the thing the agent does. A router
+choosing between these two by skill count or skill name is comparing an
+implementation tree with a capability.
+
+## Finding: a workstation can reach two of the three, and the GCP one is not what it looks like (2026-08-25)
+
+The README's standing gap said a workstation has no metadata server and so
+cannot reach any leg. True of the *federated* path, and it hid that two clouds
+accept a credential a laptop already has. Both now exist as modes, and both are
+labelled on every report row.
+
+The GCP one carries a trap worth stating on its own:
+
+- `gcloud auth print-identity-token --audiences=<service-url>` is **refused for
+  a user account** — *"Invalid account type for `--audiences`. Requires valid
+  service account."*
+- So the minted token's `aud` is gcloud's OAuth client id
+  `32555940559.apps.googleusercontent.com`, not the Cloud Run service URL that
+  `GoogleIdTokenAuth` was written to satisfy.
+- **Cloud Run accepts it regardless**, honouring Google's allowlisted CLI
+  client id.
+
+The card therefore arrives, and the audience condition the code appears to be
+exercising was never checked. `peers/auth.py` logs a warning naming this every
+time it falls back, because a green row here is not evidence about audiences.
+
+## Finding: Azure's card is behind a consent grant, not a credential (2026-08-25)
+
+`research-azure` on Container Apps is configured
+`unauthenticatedClientAction: Return401` against app registration
+`be143e2d-…` in its own tenant, whose `allowedAudiences` is that same client
+id. Requesting a token for it from the
+workstation fails before any card fetch:
+
+```
+AADSTS65001: The user or administrator has not consented to use the
+application with ID '04b07795-8ddb-461a-bbee-02f9e1bf7b46' named
+'Microsoft Azure CLI'.
+```
+
+This is not a missing credential — the workstation is signed in to the right
+tenant. It is that the Azure CLI's own app has no consent to request that
+audience. Opening it needs an admin consent grant, or a client secret on the
+app registration, which is the one mode in this repo that is not keyless.
+
+It stays in the corpus as a `FAILED` row and is excluded from the contrast
+tables, per the ground rule: a blank column would read as "this peer disagrees
+with everyone", which is the opposite of what a denial means.

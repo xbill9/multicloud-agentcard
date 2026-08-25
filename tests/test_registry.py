@@ -121,3 +121,18 @@ def test_a_credential_that_cannot_be_minted_fails_while_assembling(monkeypatch):
     monkeypatch.delenv("DEMO_A2A_ROLE_ARN", raising=False)
     with pytest.raises(AdapterError, match="DEMO_A2A_ROLE_ARN"):
         build_peers(parse_inline(["demo=https://x.example"]))
+
+
+def test_a_missing_variable_names_the_auth_variable_that_can_exist(monkeypatch):
+    """The message's whole job is to name what to set.
+
+    It used to build the prefix by trimming the *missing* variable's last
+    segment, so a missing DEMO_A2A_REGION reported `DEMO_A2A_A2A_AUTH` -- a
+    variable nothing reads and nobody can set.
+    """
+    monkeypatch.setenv("DEMO_A2A_AUTH", "aws-sigv4")
+    monkeypatch.delenv("DEMO_A2A_ROLE_ARN", raising=False)
+    with pytest.raises(AdapterError) as caught:
+        build_peers(parse_inline(["demo=https://x.example"]))
+    assert "DEMO_A2A_AUTH=aws-sigv4" in str(caught.value)
+    assert "DEMO_A2A_A2A_AUTH" not in str(caught.value)

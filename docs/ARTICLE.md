@@ -1,5 +1,7 @@
 # Cross Cloud A2A Agent Card Field Comparison
 
+![Three agent cards compared side by side. The Cloud Run card on the left is sparse, the AgentCore card in the centre is four times denser, and the Container Apps card on the right is dimmed behind a lock because it returns 401.](article-header.jpg)
+
 Comparing Agent Cards with A2A - This tutorial aims to fetch the agent card from
 A2A agents running on several mainstream Cloud providers and compare the fields
 they publish.

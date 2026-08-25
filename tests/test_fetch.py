@@ -183,3 +183,32 @@ async def test_both_denial_statuses_are_terminal(status):
 
     await fetch_card(_peer(), transport=_transport(handler))
     assert len(calls) == 1
+
+
+# The phase label. `cards/fetch.py` states the rule outright: this repo never
+# invokes anything, so an `invoke` row in a phase breakdown is a round trip
+# that cannot exist. A peer whose endpoint carries a path prefix of its own
+# used to produce exactly that.
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/.well-known/agent-card.json",
+        "/.well-known/agent.json",
+        # AgentCore serves the card under the same /invocations/ path the calls
+        # use. Measured 2026-08-25: this was filed as `invoke` on every run.
+        "/runtimes/arn%3Aaws%3Abedrock-agentcore%3A.../invocations/.well-known/agent-card.json",
+    ],
+)
+def test_a_card_fetch_is_discovery_however_the_endpoint_is_prefixed(path):
+    from peers.trace import _is_card_path
+
+    assert _is_card_path(path)
+
+
+@pytest.mark.parametrize("path", ["/", "/messages", "/invocations/", "/agent-card.json"])
+def test_anything_that_is_not_a_card_path_is_not_discovery(path):
+    from peers.trace import _is_card_path
+
+    assert not _is_card_path(path)

@@ -32,6 +32,11 @@ agentcard = "cards.cli:main"
 # exercised against without spending anything.
 specimens = ["a2a-sdk[http-server]", "google-adk", "starlette", "uvicorn"]
 dev = ["pytest", "pytest-asyncio", "ruff"]
+# Only for OTEL_TRACES_EXPORTER=gcp. The exporter is imported lazily and the
+# whole of telemetry degrades to a no-op when setup raises, so this stays an
+# extra rather than a dependency every CLI run pays for. Carried over from the
+# deleted requirements.txt, which was the one place it had ever been declared.
+gcp-trace = ["opentelemetry-exporter-gcp-trace"]
 
 [tool.setuptools.packages.find]
 include = ["cards*", "peers*", "agents*"]

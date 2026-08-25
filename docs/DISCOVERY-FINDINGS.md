@@ -152,7 +152,8 @@ rejected. Absent is not evidence of an old client; it is no evidence at all.
 # Measured by this repo on the deployed three
 
 Everything below was fetched by `agentcard fetch --peers-file peers.toml` from
-a **workstation**, on **2026-08-25**, run `8c201b95f349`. Full report:
+a **workstation**, on **2026-08-25**, run `8c201b95f349` (stored in
+`.cards-deployed/`, not the default local corpus). Full report:
 `docs/deployed-2026-08-25.md`. Two of three peers answered; Azure is a denial
 row. Per `CLAUDE.md`, every claim here names the date it was true, because
 cards change without notice and without a version bump.

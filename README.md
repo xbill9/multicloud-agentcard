@@ -119,6 +119,17 @@ Drift is measured against the **last saved run**, so `--save` accepts the
 current cards as the new baseline. Without it the same drift is re-reported
 every run until something stores it.
 
+**A corpus holds one mesh.** `--corpus-dir` exists for this: the local
+specimens live in `.cards/` (the default) and the deployed three in
+`.cards-deployed/`. Interleaving them in one directory makes the drift baseline
+alternate between two different meshes, so every other run compares a laptop
+specimen against Cloud Run:
+
+```bash
+agentcard fetch --save                                          # local
+agentcard fetch --peers-file peers.toml --corpus-dir .cards-deployed --save
+```
+
 **A peer name is not an identity.** The local specimens and the deployed agents
 are both called `gcp`, `aws` and `azure`, so a corpus holding both would diff a
 laptop specimen against Cloud Run and call it vendor drift — measured on
@@ -193,8 +204,8 @@ That split is load-bearing. Iterating on the review logic against a stored
 corpus is how the checks get written, and a `replay` that re-fetched could
 change what a past run "found".
 
-Exit codes: `0` fine, `1` bad invocation, `2` with `--fail-on-defect` when a
-card has an error-severity finding, `3` when no peer served a card at all.
+Exit codes are tabled under **Using it**: `0` fine, `1` bad invocation, `2`
+`--fail-on-defect`, `3` no peer served a card, `4` `--fail-on-change`.
 
 ---
 
@@ -202,7 +213,9 @@ card has an error-severity finding, `3` when no peer served a card at all.
 
 ```
 peers/     who to reach, and what to prove on the way
-  auth.py, aws_origin.py, trace.py, errors.py   carried over verbatim
+  aws_origin.py, errors.py                       carried over verbatim
+  auth.py      carried over, plus the two workstation modes this fork needed
+  trace.py     carried over, plus the discovery/invoke rule for prefixed paths
   registry.py                                    new: peers are data, not code
 
 cards/     fetch -> review -> compare -> report
@@ -314,7 +327,7 @@ explicit mode so a peers file can configure this per peer.
 ## Testing
 
 ```bash
-python3 -m pytest -q      # 118 passed
+python3 -m pytest -q      # 125 passed
 ruff check .              # all checks passed
 ```
 

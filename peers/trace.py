@@ -45,6 +45,25 @@ log = logging.getLogger("trace")
 _CARD_PATHS = {"/.well-known/agent-card.json", "/.well-known/agent.json"}
 
 
+def _is_card_path(path: str) -> bool:
+    """Whether a request path is a card fetch rather than an invocation.
+
+    Matched on the **suffix**, not the whole path, because a peer's endpoint may
+    carry a path prefix of its own. AgentCore serves the card under the same
+    ``/invocations/`` path the calls use, so the real request is
+    ``/runtimes/<escaped-arn>/invocations/.well-known/agent-card.json`` -- which
+    equals no registered card path and does not start with ``/.well-known/``.
+    Measured 2026-08-25: the deployed AWS leg's card fetch was filed as
+    ``invoke``, in a repo whose premise is that it never invokes, and the log
+    line said so on every run.
+    """
+    return (
+        path in _CARD_PATHS
+        or path.startswith("/.well-known/")
+        or any(path.endswith(candidate) for candidate in _CARD_PATHS)
+    )
+
+
 def register_card_path(path: str) -> None:
     """Teach the tracer about a non-standard discovery path.
 
@@ -121,9 +140,7 @@ class LegTrace:
         path = url.path or "/"
         self._record(
             TraceStep(
-                phase="discovery"
-                if path in _CARD_PATHS or path.startswith("/.well-known/")
-                else "invoke",
+                phase="discovery" if _is_card_path(path) else "invoke",
                 label=f"{request.method} {path}",
                 host=url.host or "",
                 path=path,

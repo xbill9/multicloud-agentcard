@@ -30,6 +30,59 @@ The agent card is also the only thing a client reads before it commits to a
 runtime. If two vendors describe the same agent differently, every routing
 decision downstream inherits that difference.
 
+## The A2A Stack on Each Cloud
+
+The three agents speak the same protocol and almost nothing else is the same.
+Here is what actually runs on each leg, and where each one puts the card.
+
+| | GCP | AWS | Azure |
+|---|---|---|---|
+| host | Cloud Run | Bedrock AgentCore | Container Apps |
+| card producer | `google-adk` `to_a2a()` | `a2a-sdk` reference routes | Agent Framework ⚠️ |
+| discovery path | `/.well-known/agent-card.json` | `/runtimes/<escaped-arn>/invocations/.well-known/agent-card.json` | `/.well-known/agent-card.json` |
+| edge identifier | `server: Google Frontend` | — | `x-ms-middleware-request-id` |
+| request id | `x-cloud-trace-context` | UUID | — |
+| credential | Google ID token | SigV4 | Entra bearer |
+| discovery privilege | `roles/run.invoker` | `bedrock-agentcore:GetAgentCard` | Container Apps auth |
+
+Three details in that table cost real time, so they are worth pulling out.
+
+**AWS serves the card under the invocation path.** GCP and Azure both publish at
+the well-known path on their own hostname. AgentCore does not have a per-agent
+hostname at all — the runtime is addressed by URL-escaped ARN, and the card sits
+*beneath* the same `/invocations/` path the calls use:
+
+```
+https://bedrock-agentcore.us-west-2.amazonaws.com
+  /runtimes/arn%3Aaws%3Abedrock-agentcore%3A...%3Aruntime%2Fresearch_aws-...
+  /invocations/.well-known/agent-card.json
+```
+
+That shape broke our own tracer. It classified a round trip as discovery only
+when the path *equalled* a known card path or *began* with `/.well-known/`, so
+every AgentCore card fetch was filed as an `invoke` — in a tool whose premise is
+that it never invokes anything. It is matched on the suffix now.
+
+**Discovery is a separate IAM action on AWS.** `bedrock-agentcore:GetAgentCard`
+is not `bedrock-agentcore:InvokeAgentRuntime`. A policy granting only the second
+denies the card fetch however the resources are written, and the denial surfaces
+as a protocol error nowhere near auth.
+
+**Azure denies before the container.** The 401 carries
+`www-authenticate: Bearer realm=...` and `x-ms-middleware-request-id`, and no
+`server` header from the app. That is the Container Apps auth middleware —
+configured `unauthenticatedClientAction: Return401` — answering on the agent's
+behalf. The Agent Framework process never sees the request, which is why we can
+describe its card producer but cannot show you its card.
+
+⚠️ Azure's card producer is the one cell in that table we have **not** measured.
+It is what the deployment is configured as, carried over from the project this
+forked from. Everything else is read off a response we actually received, and
+until the card can be fetched we are not going to claim otherwise.
+
+Versions, for the record: `a2a-sdk` 1.1.2, `google-adk` 2.6.3, `httpx` 0.28.1,
+`starlette` 1.3.1 on Python 3.13.14. Nothing is pinned.
+
 ## Where do I start?
 
 Start with the control, not the clouds. Two SDKs on one machine, serving cards
@@ -302,16 +355,20 @@ there on 2026-08-25.
 
 ## Catching a Card That Moved
 
-Now the result we did not plan. Two runs of the same peer, same endpoint, same
-credential, 76 minutes apart:
+Now the result we did not plan. Five runs of the same peer, same endpoint, same
+credential, across three and a half hours:
 
-| run | time (UTC) | `version` | skills | bytes | review |
-|---|---|---|---|---|---|
-| `05bb15448c63` | 16:01:04 | `0.0.1` | 4 | 1533 | 1 err, 2 warn |
-| `07f23fc6df3f` | 17:17:39 | `0.0.1` | 1 | 528 | 1 err, 2 warn |
+| run | time (UTC) | `version` | skills | bytes |
+|---|---|---|---|---|
+| `8c201b95f349` | 14:10:24 | `0.0.1` | 4 | 1533 |
+| `2a4992c4372b` | 15:58:28 | `0.0.1` | 4 | 1533 |
+| `05bb15448c63` | 16:01:04 | `0.0.1` | 4 | 1533 |
+| `07f23fc6df3f` | 17:17:39 | `0.0.1` | **1** | **528** |
+| `6dedd20d0b05` | 17:40:46 | `0.0.1` | **1** | **528** |
 
-The card lost two thirds of its bytes and three of its four skills. `version`
-did not move.
+This is a clean step change, not a flake. Three runs sit on one side of it and
+two on the other, byte-for-byte stable within each group. The card lost two
+thirds of its bytes and three of its four skills, and `version` never moved.
 
 ```
 05bb15448c63 → ['research_agent',
@@ -327,10 +384,17 @@ model, and its `web_search` tool. A router that had discovered this agent an
 hour earlier and cached "it can search the web" was, by the second run, holding
 a claim the card no longer makes.
 
-**The review output is identical across both runs.** Same `1 err 2 warn` on this
-peer, the same six defects run-wide, the same codes at the same severities. Not
-one finding moved — the error is the pre-existing `bind-address-on-card`, true
-of both cards and silent about what changed between them.
+**The review output is identical across the change.** We diffed the two defect
+blocks directly; they match line for line:
+
+```bash
+diff <(agentcard replay 05bb15448c63) <(agentcard replay 07f23fc6df3f)   # defects block: no output
+```
+
+Same `1 err 2 warn` on this peer, the same six defects run-wide, the same codes
+at the same severities. Not one finding moved — the error is the pre-existing
+`bind-address-on-card`, true of both cards and silent about what changed between
+them.
 
 A checker that asks only *is this card conformant* therefore reports no
 difference, because on that question there is none. The card that lost three
@@ -401,6 +465,70 @@ ADK on Cloud Run, 2 109 bytes from AgentCore.
 The row that matters is the drift column. Every other approach reports "no
 change" on the card that lost three skills.
 
+## Validating the Claims
+
+A tool that reports a finding is not evidence that the finding is true — the
+report and the bug would come from the same code. So every claim above was
+re-checked, and wherever possible re-checked with `curl` and `python -c`,
+with none of this project in the path.
+
+| claim | how it was checked | result |
+|---|---|---|
+| Two SDKs, two card shapes | `curl` both local cards | 🟢 holds |
+| `protocolVersion` in opposite places | `curl`, read the field directly | 🟢 holds |
+| Both shapes reproduce when deployed | parsed the servers' stored raw bytes | 🟢 holds |
+| Live card advertises `0.0.0.0:8080` | `curl` the deployed Cloud Run card | 🟢 holds |
+| Neither deployed card declares auth | `curl` / raw bytes | 🟢 holds |
+| The runtimes disagree on "skill" | raw bytes, field by field | 🟢 holds |
+| A card changed with no version bump | five stored runs over 3.5 h | 🟢 holds |
+| The review did not notice | `diff` of both review outputs | 🟢 identical |
+| The two gates catch different things | both run on the same changed card | 🟢 0 vs 4 |
+| `replay` never dials | killed every server, then replayed | 🟢 holds |
+| A peer name is not an identity | diffed a local run against a deployed run | 🟢 not gated |
+
+The independence matters most for the version claim. Here is that check with no
+tooling at all:
+
+```console
+$ curl -s http://127.0.0.1:11001/.well-known/agent-card.json | python3 -c "..."
+  top-level protocolVersion : None
+  per-interface            : ['1.0']
+
+$ curl -s http://127.0.0.1:11002/.well-known/agent-card.json | python3 -c "..."
+  top-level protocolVersion : '0.3'
+  per-interface            : [None]
+```
+
+The `replay` check is the other one worth showing, because it is a claim about
+what the tool does *not* do. Stop every server, confirm nothing is listening,
+then replay a run that fetched three cards:
+
+```console
+$ ss -ltn | grep -c '1100[123]'
+0
+$ agentcard replay
+run 1657b2be9bff  3/3 card(s)  46ms
+  gcp    200  1.0          675B  none              0 err  0 warn
+  aws    200  hybrid       717B  none              0 err  1 warn
+  azure  200  hybrid       719B  none              0 err  1 warn
+```
+
+Three cards reviewed with every server dead. It cannot have dialled.
+
+Two apparent failures during this pass turned out to be faults in the *test*,
+not the tool, and both are worth naming because they are easy to repeat.
+`--fail-on-defect` looked like it exited `2` instead of `0` — we had re-fetched
+before the restarted specimen was serving, so the run recorded a real `no-card`
+error. And `replay` printed nothing once, because the run we asked for had been
+fetched without `--save` and was never stored; the tool said exactly that and
+exited `1`.
+
+One claim did not survive the pass. An earlier draft said both sides of the
+drifted card *passed every check*. They do not — the pre-existing
+`bind-address-on-card` error is present before and after. Stated correctly the
+finding is sharper: the review is not clean on either side, it is **identical**
+on both.
+
 ## Summary
 
 The strategy for reading A2A agent cards across three clouds was validated with
@@ -418,14 +546,27 @@ an incremental, control-first approach.
 - 🟢 **The runtimes disagree about what a skill is.** ADK flattens its
   composition tree onto the card; AgentCore publishes the system prompt and the
   model id.
-- 🟢 **A live card changed with no version bump**, inside one session, with
-  every conformance check green on both sides.
+- 🟢 **A live card changed with no version bump.** Five runs over three and a
+  half hours show a clean step change from four skills to one, and the review
+  output is *identical* on both sides of it — not clean, identical. A checker
+  that asks only "is this card conformant" reports no difference, because on
+  that question there is none.
+- 🟢 **The three stacks agree on the protocol and little else.** AWS serves the
+  card beneath the same `/invocations/` path the calls use; GCP and Azure
+  publish at the well-known path on their own hostname. Discovery is a separate
+  IAM action on AWS, and on Azure the denial comes from platform middleware
+  before the container is ever reached.
 - 🔴 **Azure remains shut.** Its Entra app has not consented to the CLI client
   id, so opening it needs an admin consent grant or a client secret.
 
+Every claim above was re-checked with `curl` and `python -c`, with none of this
+project in the path, because a tool reporting its own finding is not evidence
+that the finding is true. One claim did not survive that pass and was corrected
+rather than quietly dropped.
+
 The instrument stores the bytes and dates every corpus, which is what makes the
-last of those findings visible at all. Cards change without notice and without a
-version bump — so every claim in this article names the date it was measured on.
+drift finding visible at all. Cards change without notice and without a version
+bump — so every claim in this article names the date it was measured on.
 
 The code is at
 [xbill9/multicloud-agentcard](https://github.com/xbill9/multicloud-agentcard).

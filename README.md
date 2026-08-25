@@ -67,8 +67,9 @@ run 8c201b95f349  2/3 card(s)  5126ms
   azure  FAILED  authentication: 401 on /.well-known/agent-card.json
 ```
 
-The full report is `docs/deployed-2026-08-25.md`, and the findings are written
-up in `docs/DISCOVERY-FINDINGS.md`. The headline: **the two shapes reported
+The full report is `docs/deployed-2026-08-25.md`, the findings are written up in
+`docs/DISCOVERY-FINDINGS.md`, and `docs/ARTICLE.md` is the write-up of the whole
+run. The headline: **the two shapes reported
 above off the local specimens reproduce on the deployed pair** — Cloud Run/ADK
 serves a 1.0-shaped card, AgentCore a hybrid one declaring `0.3` — and ADK's
 `0.0.0.0:8080` bind address is still on the live card.

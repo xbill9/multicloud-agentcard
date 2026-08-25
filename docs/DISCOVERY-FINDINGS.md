@@ -295,7 +295,14 @@ hour earlier and cached "it can search the web" was, by the second run, holding
 a claim the card no longer makes.
 
 This is the whole argument for storing the bytes and dating the corpus. The
-conformance review is **green on both** cards: nothing here is a defect, both
-are legal, and a checker that only asks "is this card valid" reports no change
-whatsoever. `agentcard --corpus-dir .cards-deployed diff` reports it in one
-line, and `--fail-on-change` exits 4.
+review output is **identical across the two runs** -- both report `1 err 2 warn`
+on this peer, the same six defects run-wide, the same codes at the same
+severities. Not one finding moved. The error is the pre-existing
+`bind-address-on-card`, which is true of both cards and says nothing about what
+changed between them.
+
+So a checker that asks only "is this card conformant" reports no difference
+whatsoever, because on that question there is none: the card that lost three
+skills is exactly as conformant as the one that had them.
+`agentcard --corpus-dir .cards-deployed diff` reports it in one line, and
+`--fail-on-change` exits 4.

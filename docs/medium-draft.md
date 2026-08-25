@@ -85,7 +85,7 @@ agents and a comparison of the wrong ones.
 The GCP agent runs on Cloud Run behind IAM. Fetch the card with an identity
 token:
 
-![Code: $ TOK=$(gcloud auth print-identity-token)](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-04.png)
+![Code: $ TOK=$gcloud auth print-identity-token](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-04.png)
 
 The card is served at the well known path on the service hostname. Discovery is
 gated by `roles/run.invoker` at the Google Frontend.
@@ -108,7 +108,7 @@ ARN, and the card sits beneath the same `/invocations/` path the calls use:
 
 List the runtime and confirm it is ready:
 
-![Code: $ aws bedrock-agentcore-control list-agent-runtimes --region us-west-2](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-07.png)
+![Code: $ aws bedrock-agentcore-control list-agent-runtimes --region us-](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-07.png)
 
 The card is 2,109 bytes, four times the size of the Cloud Run card for the same
 agent:
@@ -125,7 +125,7 @@ must match on the suffix.
 The Azure agent runs on Container Apps. Fetching the card without a credential
 returns a 401:
 
-![Code: $ curl -s -D - https://research-azure....azurecontainerapps.io/.well-k](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-09.png)
+![Code: $ curl -s -D - https://research-azure....azurecontainerapps.io/.](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-09.png)
 
 There is no `server` header from the application. The response comes from the
 Container Apps auth middleware, configured `unauthenticatedClientAction:
@@ -133,7 +133,7 @@ Return401`, answering on the agent's behalf.
 
 Check the auth configuration:
 
-![Code: $ az containerapp auth show -n research-azure -g research-mesh-rg](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-10.png)
+![Code: $ az containerapp auth show -n research-azure -g research-mesh-r](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-10.png)
 
 The Agent Framework process never receives the request, so this leg contributes
 a denial row rather than a card.
@@ -152,7 +152,7 @@ consent grant or a client secret.
 The GCP leg has a related issue. Pinning the audience is refused for a user
 account:
 
-![Code: $ gcloud auth print-identity-token --audiences=https://research-gcp-..](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-12.png)
+![Code: $ gcloud auth print-identity-token --audiences=https://research-](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-12.png)
 
 The token that comes back carries `aud` set to the gcloud OAuth client id,
 `32555940559.apps.googleusercontent.com`, and not the Cloud Run service URL.
@@ -164,7 +164,7 @@ proves IAM role membership only, so the tool logs a warning on every fallback.
 This is the full top level field inventory for the two deployed cards. The spec
 groups fields into required core, 1.0 era, legacy 0.x, and optional:
 
-![Table: category; field; Cloud Run (ADK); AgentCore (a2a-sdk)](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-01.png)
+![Table: category; field; Cloud Run ADK; AgentCore a2a-sdk](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-01.png)
 
 Three conclusions follow directly from that table.
 
@@ -199,7 +199,7 @@ declares a version it does not match.
 
 The two SDKs put the protocol version in opposite places:
 
-![Table: location; Cloud Run (ADK); AgentCore (a2a-sdk)](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-03.png)
+![Table: location; Cloud Run ADK; AgentCore a2a-sdk](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-03.png)
 
 A client that reads the top level field sees nothing from Cloud Run and `0.3`
 from AgentCore. A client that reads the per interface field sees `1.0` from
@@ -216,7 +216,7 @@ The reliable test is structural. Branch on the presence of
 
 The `capabilities` object differs by one key:
 
-![Table: capability; Cloud Run (ADK); AgentCore (a2a-sdk)](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-04.png)
+![Table: capability; Cloud Run ADK; AgentCore a2a-sdk](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-04.png)
 
 Cloud Run states that push notifications are unsupported. AgentCore says
 nothing.
@@ -231,7 +231,7 @@ confidence.
 Both cards carry exactly one skill with the same four keys, and the values have
 almost nothing in common:
 
-![Table: skill field; Cloud Run (ADK); AgentCore (a2a-sdk)](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-05.png)
+![Table: skill field; Cloud Run ADK; AgentCore a2a-sdk](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-05.png)
 
 The `id` fields name different things. ADK uses the agent name, so the skill id
 and the agent name are the same string. AgentCore uses the capability name.
@@ -253,7 +253,7 @@ similarity compares documents of different kinds.
 Not every difference is the runtime's doing. The same a2a-sdk version produces
 different fields in two deployments:
 
-![Code: local    aws skills[0]: description, examples, id, inputModes, name, o](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-13.png)
+![Code: local    aws skills0: description, examples, id, inputModes, nam](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-13.png)
 
 The local specimen sets `examples`, `inputModes` and `outputModes`. The deployed
 agent does not. `documentationUrl` behaves the same way, present locally and
@@ -306,7 +306,7 @@ The agents are identical echo agents, so the shape difference is the SDK.
 
 Point the tool at a peers file and fetch the deployed agents:
 
-![Code: $ agentcard --corpus-dir .cards-deployed fetch --peers-file peers.toml](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-15.png)
+![Code: $ agentcard --corpus-dir .cards-deployed fetch --peers-file peer](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-15.png)
 
 Two of three answered. The Azure leg stays in the corpus as a row rather than a
 gap, because a blank column reads as disagreement with every other peer, which
@@ -321,7 +321,7 @@ The run produced six findings:
 Five runs of the same peer, at the same endpoint, with the same credential,
 across three and a half hours:
 
-![Table: run; time (UTC); version; skills; bytes](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-09.png)
+![Table: run; time UTC; version; skills; bytes](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-09.png)
 
 Three runs sit on one side and two on the other, and each group is byte for byte
 stable. The card lost two thirds of its bytes and three of its four skills, and
@@ -329,7 +329,7 @@ the `version` field did not move.
 
 The flattened composition is what was removed:
 
-![Code: 05bb15448c63 -> ['research_agent',](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-16.png)
+![Code: 05bb15448c63 -> 'research_agent',](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-16.png)
 
 A client that discovered this agent at 16:01 and cached "it can search the web"
 held a claim the card no longer made by 17:17.
@@ -385,7 +385,7 @@ Each result was re-checked with curl and python3, independent of the tool:
 The replay path is tested by removing the network. Stop every server, confirm
 nothing is listening, then replay a run that fetched three cards:
 
-![Code: $ ss -ltn | grep -c '1100[123]'](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-18.png)
+![Code: $ ss -ltn | grep -c '1100123'](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-18.png)
 
 Three cards are reviewed with every server down.
 

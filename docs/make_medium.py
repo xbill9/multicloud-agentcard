@@ -184,6 +184,18 @@ def render_code(code: str, path: Path):
     plt.close(fig)
 
 
+def alt_safe(text: str) -> str:
+    """Make a snippet safe to sit inside markdown image alt text.
+
+    Brackets and parentheses in alt text break ``![alt](url)``. A code line such
+    as ``05bb15448c63 -> ['research_agent',`` carries an unbalanced ``[``, and
+    python-markdown then leaves the whole reference as literal text rather than
+    emitting an image. Measured 2026-08-25: exactly one figure of thirty-two
+    went missing this way, and it is invisible in the markdown.
+    """
+    return re.sub(r"[\[\]()]", "", text).strip()
+
+
 def main() -> None:
     src = (DOCS / "devto-draft.md").read_text()
     # drop the dev.to front matter
@@ -201,7 +213,7 @@ def main() -> None:
             render_table(header, body, OUT / name)
             # Caption is plain text. A link inside a figcaption makes Medium
             # drop the entire figure, silently.
-            alt = "Table: " + "; ".join(header)
+            alt = alt_safe("Table: " + "; ".join(header))
             out_md.append(f"![{alt}]({RAW}/img/medium/{name})")
         elif kind == "code":
             inner = payload.split("\n")[1:-1]
@@ -212,7 +224,7 @@ def main() -> None:
                 name = f"code-{n_code:02d}.png"
                 render_code(payload, OUT / name)
                 first = next((ln for ln in inner if ln.strip()), "")
-                out_md.append(f"![Code: {first.strip()[:70]}]({RAW}/img/medium/{name})")
+                out_md.append(f"![{alt_safe('Code: ' + first)[:70]}]({RAW}/img/medium/{name})")
         else:
             # Medium has two heading sizes. Push every section heading down to
             # the small one, or the article reads as a stack of titles.

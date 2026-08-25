@@ -35,7 +35,7 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
 # Shell examples are full of `$` and field names are full of `_`. Without this,
 # matplotlib reads the first `$` as the start of a mathtext expression and
@@ -87,7 +87,7 @@ def parse_blocks(text: str):
             while i < len(lines) and not lines[i].startswith("```"):
                 fence.append(lines[i])
                 i += 1
-            fence.append("```" if i < len(lines) else "```")
+            fence.append("```")
             i += 1
             flush()
             out.append(("code", "\n".join(fence)))
@@ -216,7 +216,7 @@ def main() -> None:
         else:
             # Medium has two heading sizes. Push every section heading down to
             # the small one, or the article reads as a stack of titles.
-            text = re.sub(r"^## ", "#### ", payload, flags=re.M)
+            text = re.sub(r"^## ", "#### ", payload, flags=re.MULTILINE)
             out_md.append(text)
 
     header_img = ("![Three agent cards compared side by side. The Cloud Run card on the "

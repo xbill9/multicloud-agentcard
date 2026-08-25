@@ -65,7 +65,12 @@ def build() -> Path:
 
     html_body = markdown.markdown(md, extensions=["tables", "fenced_code"])
 
-    # Wrap each image in a figure with its alt text as a plain-text caption.
+    # Replace the whole enclosing paragraph, not just the img inside it.
+    # python-markdown wraps a standalone image line in <p>, and <figure> is not
+    # allowed inside <p>: a parser closes the paragraph at the figure's start
+    # tag, and Medium's importer discards what that leaves. Measured
+    # 2026-08-25 -- two imports arrived with the prose intact and all 31
+    # figures missing, from <p><figure>...</figure></p>.
     # Medium takes figcaption as the caption; a link in one drops the figure.
     def figure(m):
         alt, src = m.group(1), m.group(2)
@@ -73,7 +78,9 @@ def build() -> Path:
         return (f'<figure><img src="{src}" alt="{alt}" />'
                 f"<figcaption>{caption}</figcaption></figure>")
 
-    html_body = re.sub(r'<img alt="([^"]*)" src="([^"]*)"\s*/?>', figure, html_body)
+    html_body = re.sub(
+        r'<p>\s*<img alt="([^"]*)" src="([^"]*)"\s*/?>\s*</p>', figure, html_body
+    )
 
     page = (
         "<!doctype html>\n<html lang=\"en\">\n<head>\n"

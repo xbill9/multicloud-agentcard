@@ -260,7 +260,7 @@ $ az containerapp auth show -n research-azure -g research-mesh-rg
 ```
 
 The Agent Framework process never receives the request. Its card producer is
-therefore reported as configuration rather than as a measured result.
+taken from the deployment configuration.
 
 ## Debugging API Permission Errors
 
@@ -525,9 +525,7 @@ on Cloud Run and 2,109 bytes from AgentCore.
 
 ## Validating the Results
 
-A tool reporting its own finding is not evidence that the finding is correct.
-Each result was re-checked with curl and python3, with none of this project in
-the path:
+Each result was re-checked with curl and python3, independent of the tool:
 
 | result | validation method | outcome |
 |---|---|---|
@@ -543,9 +541,8 @@ the path:
 | replay never dials | every server killed, then replayed | confirmed |
 | A peer name is not an identity | local run diffed against deployed run | not gated |
 
-The replay result is a statement about what the tool does not do, so it is
-tested by removing the network. Stop every server, confirm nothing is listening,
-then replay a run that fetched three cards:
+The replay path is tested by removing the network. Stop every server, confirm
+nothing is listening, then replay a run that fetched three cards:
 
 ```console
 $ ss -ltn | grep -c '1100[123]'
@@ -559,10 +556,10 @@ run 1657b2be9bff  3/3 card(s)  46ms
 
 Three cards are reviewed with every server down.
 
-Two checks need care to reproduce. A re-fetch issued before a restarted specimen
-is serving records a genuine no-card error, so assert that all peers returned a
-card before reading the gate. And replay operates only on stored runs, so the
-preceding fetch must use `--save`.
+Two conditions apply when reproducing this. Assert that every peer returned a
+card before reading a gate, since a specimen that is not yet serving records a
+real no-card error. And replay operates only on stored runs, so the preceding
+fetch must use `--save`.
 
 ## Final Results
 

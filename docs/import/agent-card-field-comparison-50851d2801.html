@@ -122,10 +122,20 @@ account:</p>
 Cloud Run accepts it anyway, honouring the allowlisted CLI client id. The result
 proves IAM role membership only, so the tool logs a warning on every fallback.</p>
 <h4>What Fields are Actually in the Cards?</h4>
-<p>This is the full top level field inventory for the two deployed cards. The spec
+<p>This is the full top level field inventory across the three clouds. The spec
 groups fields into required core, 1.0 era, legacy 0.x, and optional:</p>
-<figure><img src="https://xbill9.github.io/multicloud-agentcard/img/medium/table-01.png" alt="Table: category; field; Cloud Run ADK; AgentCore a2a-sdk" /><figcaption>Table: category; field; Cloud Run ADK; AgentCore a2a-sdk</figcaption></figure>
-<p>Three conclusions follow directly from that table.</p>
+<figure><img src="https://xbill9.github.io/multicloud-agentcard/img/medium/table-01.png" alt="Table: category; field; Cloud Run ADK; AgentCore a2a-sdk; Container Apps" /><figcaption>Table: category; field; Cloud Run ADK; AgentCore a2a-sdk; Container Apps</figcaption></figure>
+<p>The Container Apps column is the honest shape of the result. Its agent answers
+401 at the platform auth middleware, so there is no card to inventory and no
+field in it can be reported either way.</p>
+<p>That column is not the same as a column of noes. A no means the card was read
+and the field was absent. <code>no card</code> means nothing was read at all, and every
+field in that column is unknown rather than missing. Collapsing the two would
+turn one denial into twenty findings.</p>
+<p>The local mesh does not fill the gap either. Its <code>azure</code> specimen runs the
+a2a-sdk reference routes rather than Agent Framework, so it is a control for the
+SDK and says nothing about what the deployed Azure runtime publishes.</p>
+<p>Three conclusions follow from the two columns that do carry a card.</p>
 <h4>Required Fields - Where the Clouds Agree</h4>
 <p>Both cards carry all seven required fields. Neither card is malformed, and a
 validator checking only the required set passes both.</p>

@@ -251,33 +251,46 @@ proves IAM role membership only, so the tool logs a warning on every fallback.
 
 ## What Fields are Actually in the Cards?
 
-This is the full top level field inventory for the two deployed cards. The spec
+This is the full top level field inventory across the three clouds. The spec
 groups fields into required core, 1.0 era, legacy 0.x, and optional:
 
-| category | field | Cloud Run (ADK) | AgentCore (a2a-sdk) |
-|---|---|---|---|
-| required | capabilities | yes | yes |
-| required | defaultInputModes | yes | yes |
-| required | defaultOutputModes | yes | yes |
-| required | description | yes | yes |
-| required | name | yes | yes |
-| required | skills | yes | yes |
-| required | version | yes | yes |
-| 1.0 | supportedInterfaces | yes | yes |
-| 1.0 | securityRequirements | no | no |
-| legacy 0.x | url | no | yes |
-| legacy 0.x | preferredTransport | no | yes |
-| legacy 0.x | additionalInterfaces | no | no |
-| legacy 0.x | security | no | no |
-| legacy 0.x | supportsAuthenticatedExtendedCard | no | no |
-| optional | protocolVersion | no | yes |
-| optional | documentationUrl | no | no |
-| optional | iconUrl | no | no |
-| optional | provider | no | no |
-| optional | securitySchemes | no | no |
-| optional | signatures | no | no |
+| category | field | Cloud Run (ADK) | AgentCore (a2a-sdk) | Container Apps |
+|---|---|---|---|---|
+| required | capabilities | yes | yes | no card |
+| required | defaultInputModes | yes | yes | no card |
+| required | defaultOutputModes | yes | yes | no card |
+| required | description | yes | yes | no card |
+| required | name | yes | yes | no card |
+| required | skills | yes | yes | no card |
+| required | version | yes | yes | no card |
+| 1.0 | supportedInterfaces | yes | yes | no card |
+| 1.0 | securityRequirements | no | no | no card |
+| legacy 0.x | url | no | yes | no card |
+| legacy 0.x | preferredTransport | no | yes | no card |
+| legacy 0.x | additionalInterfaces | no | no | no card |
+| legacy 0.x | security | no | no | no card |
+| legacy 0.x | supportsAuthenticatedExtendedCard | no | no | no card |
+| optional | protocolVersion | no | yes | no card |
+| optional | documentationUrl | no | no | no card |
+| optional | iconUrl | no | no | no card |
+| optional | provider | no | no | no card |
+| optional | securitySchemes | no | no | no card |
+| optional | signatures | no | no | no card |
 
-Three conclusions follow directly from that table.
+The Container Apps column is the honest shape of the result. Its agent answers
+401 at the platform auth middleware, so there is no card to inventory and no
+field in it can be reported either way.
+
+That column is not the same as a column of noes. A no means the card was read
+and the field was absent. `no card` means nothing was read at all, and every
+field in that column is unknown rather than missing. Collapsing the two would
+turn one denial into twenty findings.
+
+The local mesh does not fill the gap either. Its `azure` specimen runs the
+a2a-sdk reference routes rather than Agent Framework, so it is a control for the
+SDK and says nothing about what the deployed Azure runtime publishes.
+
+Three conclusions follow from the two columns that do carry a card.
 
 ## Required Fields - Where the Clouds Agree
 

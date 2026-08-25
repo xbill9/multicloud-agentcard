@@ -161,12 +161,25 @@ proves IAM role membership only, so the tool logs a warning on every fallback.
 
 #### What Fields are Actually in the Cards?
 
-This is the full top level field inventory for the two deployed cards. The spec
+This is the full top level field inventory across the three clouds. The spec
 groups fields into required core, 1.0 era, legacy 0.x, and optional:
 
-![Table: category; field; Cloud Run ADK; AgentCore a2a-sdk](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-01.png)
+![Table: category; field; Cloud Run ADK; AgentCore a2a-sdk; Container Apps](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-01.png)
 
-Three conclusions follow directly from that table.
+The Container Apps column is the honest shape of the result. Its agent answers
+401 at the platform auth middleware, so there is no card to inventory and no
+field in it can be reported either way.
+
+That column is not the same as a column of noes. A no means the card was read
+and the field was absent. `no card` means nothing was read at all, and every
+field in that column is unknown rather than missing. Collapsing the two would
+turn one denial into twenty findings.
+
+The local mesh does not fill the gap either. Its `azure` specimen runs the
+a2a-sdk reference routes rather than Agent Framework, so it is a control for the
+SDK and says nothing about what the deployed Azure runtime publishes.
+
+Three conclusions follow from the two columns that do carry a card.
 
 #### Required Fields - Where the Clouds Agree
 

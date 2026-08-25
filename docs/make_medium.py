@@ -196,7 +196,33 @@ def alt_safe(text: str) -> str:
     return re.sub(r"[\[\]()]", "", text).strip()
 
 
+FRONT_MATTER = """---
+title: Cross Cloud A2A Agent Card Field Comparison
+published: false
+description: Fetching A2A agent cards from Cloud Run, Bedrock AgentCore and Azure Container Apps, and comparing every field they publish.
+tags: a2a, multicloud, ai, python
+cover_image: https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/article-header.jpg
+---
+"""
+
+
+def build_devto() -> None:
+    """ARTICLE.md plus dev.to front matter.
+
+    Generated rather than hand-maintained. The Medium version is built from this
+    file, so a dev.to draft edited by hand and an ARTICLE.md edited separately
+    would put three copies of the same prose out of step.
+    """
+    src = (DOCS / "ARTICLE.md").read_text()
+    body = src.split("\n", 1)[1]
+    body = "\n".join(
+        line for line in body.split("\n") if not line.startswith("![Three agent cards")
+    )
+    (DOCS / "devto-draft.md").write_text(FRONT_MATTER + body.lstrip("\n"))
+
+
 def main() -> None:
+    build_devto()
     src = (DOCS / "devto-draft.md").read_text()
     # drop the dev.to front matter
     if src.startswith("---"):
@@ -238,7 +264,8 @@ def main() -> None:
     md = ("# Cross Cloud A2A Agent Card Field Comparison\n\n"
           + header_img + "\n\n" + "\n\n".join(b.strip("\n") for b in out_md if b.strip()) + "\n")
     (DOCS / "medium-draft.md").write_text(md)
-    print(f"medium-draft.md written: {n_tbl} tables and {n_code} code blocks as images")
+    print(f"devto-draft.md and medium-draft.md written: "
+          f"{n_tbl} tables and {n_code} code blocks as images")
 
 
 if __name__ == "__main__":

@@ -273,3 +273,29 @@ app registration, which is the one mode in this repo that is not keyless.
 It stays in the corpus as a `FAILED` row and is excluded from the contrast
 tables, per the ground rule: a blank column would read as "this peer disagrees
 with everyone", which is the opposite of what a denial means.
+
+## Finding: a deployed card changed materially, with no version bump, inside one hour (2026-08-25)
+
+The claim in `CLAUDE.md` — *cards change without notice and without a version
+bump* — measured on a live deployment rather than asserted. Two runs of the
+same peer, same endpoint, same credential, 76 minutes apart:
+
+| run | time (UTC) | `version` | `protocolVersion` | skills | bytes |
+|---|---|---|---|---|---|
+| `05bb15448c63` | 16:01:04 | `0.0.1` | absent | 4 | 1533 |
+| `07f23fc6df3f` | 17:17:39 | `0.0.1` | absent | 1 | 528 |
+
+The card lost two thirds of its bytes and three of its four skills. `version`
+did not move. Nothing a client polls could have told it apart from a cache hit.
+
+What went is the flattened composition — `research_agent-sub-agents`,
+`research_agent_gemini_research_agent_gemini` and the `-web_search` tool entry
+— leaving only `research_agent`. A router that had discovered this agent an
+hour earlier and cached "it can search the web" was, by the second run, holding
+a claim the card no longer makes.
+
+This is the whole argument for storing the bytes and dating the corpus. The
+conformance review is **green on both** cards: nothing here is a defect, both
+are legal, and a checker that only asks "is this card valid" reports no change
+whatsoever. `agentcard --corpus-dir .cards-deployed diff` reports it in one
+line, and `--fail-on-change` exits 4.

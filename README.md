@@ -126,8 +126,9 @@ alternate between two different meshes, so every other run compares a laptop
 specimen against Cloud Run:
 
 ```bash
-agentcard fetch --save                                          # local
-agentcard fetch --peers-file peers.toml --corpus-dir .cards-deployed --save
+agentcard fetch --save                                     # local
+# --corpus-dir is a global flag: it goes before the subcommand, not after.
+agentcard --corpus-dir .cards-deployed fetch --peers-file peers.toml --save
 ```
 
 **A peer name is not an identity.** The local specimens and the deployed agents

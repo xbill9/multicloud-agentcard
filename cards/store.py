@@ -36,8 +36,52 @@ def save(corpus: Corpus, directory: Path | str = DEFAULT_DIR) -> Path:
     return path
 
 
+class UnknownRun(LookupError):
+    """A run reference that names nothing in the corpus."""
+
+
 def load(path: Path | str) -> Corpus:
     return Corpus.model_validate_json(Path(path).read_text())
+
+
+def resolve(ref: Path | str, directory: Path | str = DEFAULT_DIR) -> Path:
+    """Turn whatever the user typed into a stored run's path.
+
+    ``history`` prints a run id and a file name; neither used to be accepted
+    back, so the only way to replay a run was to retype the full relative path
+    -- and getting it wrong raised a bare ``FileNotFoundError`` traceback from
+    inside pydantic. Every identifier this repo prints is now an identifier it
+    takes: a path, a file name in the corpus dir, a full run id, or any
+    unambiguous prefix of one.
+
+    Ambiguity is an error rather than a newest-wins guess. Run ids are random
+    hex, so a prefix matching two of them means the user typed too few
+    characters, and silently replaying one of the two is how a report ends up
+    describing a run nobody looked at.
+    """
+    directory = Path(directory)
+    candidate = Path(ref)
+    if candidate.is_file():
+        return candidate
+    direct = directory / candidate.name
+    if direct.is_file():
+        return direct
+
+    text = str(ref)
+    runs = history(directory)
+    # Exact run id first: a full id must never be read as a prefix of another.
+    exact = [p for p in runs if p.stem.split("-")[-1] == text]
+    hits = exact or [p for p in runs if p.stem.split("-")[-1].startswith(text)]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        raise UnknownRun(
+            f"no stored run matches {text!r} in {directory}. Run `agentcard history` to list them."
+        )
+    raise UnknownRun(
+        f"{text!r} matches {len(hits)} stored runs in {directory}: "
+        + ", ".join(p.name for p in hits)
+    )
 
 
 def history(directory: Path | str = DEFAULT_DIR) -> list[Path]:

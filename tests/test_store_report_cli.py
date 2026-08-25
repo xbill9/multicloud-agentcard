@@ -190,3 +190,54 @@ def test_naming_a_peer_suppresses_the_built_ins(argv, expected):
 
     args = build_parser().parse_args(argv)
     assert [s.name for s in _specs(args)] == expected
+
+
+# Every identifier the tool prints must be one it takes back. `history` prints
+# a run id and a file name; before this, `replay <run id>` raised a bare
+# FileNotFoundError traceback out of pydantic and the only accepted form was a
+# full relative path nothing ever printed.
+
+
+def test_resolve_accepts_every_form_history_prints(tmp_path, hybrid_card):
+    path = store.save(_corpus(("aws", hybrid_card), run_id="abc123def456"), tmp_path)
+    for ref in (str(path), path.name, "abc123def456", "abc1"):
+        assert store.resolve(ref, tmp_path) == path
+
+
+def test_resolve_prefers_a_whole_run_id_over_a_longer_one(tmp_path, hybrid_card):
+    short = store.save(_corpus(("aws", hybrid_card), run_id="abc123"), tmp_path)
+    store.save(_corpus(("gcp", hybrid_card), run_id="abc1234567"), tmp_path)
+    assert store.resolve("abc123", tmp_path) == short
+
+
+def test_resolve_refuses_an_ambiguous_prefix(tmp_path, hybrid_card):
+    store.save(_corpus(("aws", hybrid_card), run_id="abc111"), tmp_path)
+    store.save(_corpus(("gcp", hybrid_card), run_id="abc222"), tmp_path)
+    with pytest.raises(store.UnknownRun, match="matches 2 stored runs"):
+        store.resolve("abc", tmp_path)
+
+
+def test_resolve_names_the_way_out_when_nothing_matches(tmp_path):
+    with pytest.raises(store.UnknownRun, match="agentcard history"):
+        store.resolve("nope", tmp_path)
+
+
+def test_replay_takes_a_run_id_from_history(tmp_path, hybrid_card, capsys):
+    store.save(_corpus(("aws", hybrid_card), run_id="feedface0001"), tmp_path)
+    assert main(["--corpus-dir", str(tmp_path), "replay", "feedface0001"]) == 0
+    assert "feedface0001" in capsys.readouterr().out
+
+
+def test_diff_takes_run_ids(tmp_path, hybrid_card, capsys):
+    store.save(_corpus(("aws", hybrid_card), run_id="aaa111"), tmp_path)
+    moved = dict(hybrid_card, version="9.9.9")
+    store.save(_corpus(("aws", moved), run_id="bbb222"), tmp_path)
+    assert main(["--corpus-dir", str(tmp_path), "diff", "aaa111", "bbb222"]) == 0
+    assert "version changed" in capsys.readouterr().out
+
+
+def test_an_unknown_run_is_one_line_not_a_traceback(tmp_path, capsys):
+    with pytest.raises(SystemExit) as caught:
+        main(["--corpus-dir", str(tmp_path), "replay", "nope"])
+    assert caught.value.code == 1
+    assert "no stored run matches" in capsys.readouterr().err

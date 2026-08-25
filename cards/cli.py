@@ -164,6 +164,15 @@ def _latest_or_exit(directory: Path) -> Corpus:
     return corpus
 
 
+def _load_or_exit(ref: str, directory: Path) -> Corpus:
+    """Load a run the user named, reporting a miss in one line, not a traceback."""
+    try:
+        return store.load(store.resolve(ref, directory))
+    except store.UnknownRun as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -177,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "show":
-        corpus = store.load(args.run) if args.run else _latest_or_exit(directory)
+        corpus = _load_or_exit(args.run, directory) if args.run else _latest_or_exit(directory)
         found = next((s for s in corpus.specimens if s.peer == args.peer), None)
         if found is None:
             print(
@@ -195,7 +204,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "diff":
         runs = store.history(directory)
         if args.old and args.new:
-            old, new = store.load(args.old), store.load(args.new)
+            old = _load_or_exit(args.old, directory)
+            new = _load_or_exit(args.new, directory)
         elif len(runs) < 2:
             print("need two stored runs to diff", file=sys.stderr)
             return 1
@@ -213,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "replay":
-        corpus = store.load(args.run) if args.run else _latest_or_exit(directory)
+        corpus = _load_or_exit(args.run, directory) if args.run else _latest_or_exit(directory)
         _render(corpus, args)
         return 0
 

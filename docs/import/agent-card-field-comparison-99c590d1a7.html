@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cross Cloud A2A Agent Card Field Comparison</title>
+<style>
+body { max-width: 46rem; margin: 2rem auto; padding: 0 1rem;
+       font: 17px/1.6 Georgia, 'Times New Roman', serif; color: #1a1a1a; }
+h1 { font-size: 2.1rem; line-height: 1.15; }
+h4 { font-size: 1.25rem; margin-top: 2.2rem; }
+img { max-width: 100%; height: auto; display: block; margin: 1.4rem 0; }
+figure { margin: 1.6rem 0; }
+figcaption { font-size: 0.85rem; color: #666; }
+pre, code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 0.9em; }
+pre { background: #f6f7f4; padding: 0.8rem 1rem; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+td, th { border-bottom: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; }
+</style>
+</head>
+<body>
+<h1>Cross Cloud A2A Agent Card Field Comparison</h1>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/article-header.jpg" alt="Three agent cards compared side by side. The Cloud Run card on the left is sparse, the AgentCore card in the centre is four times denser, and the Container Apps card on the right is dimmed behind a lock because it returns 401." /><figcaption>Three agent cards compared side by side. The Cloud Run card on the left is sparse, the AgentCore card in the centre is four times denser, and the Container Apps card on the right is dimmed behind a lock because it returns 401.</figcaption></figure></p>
+<p>Comparing Agent Cards with A2A - This tutorial aims to fetch the agent card from
+A2A agents running on several mainstream Cloud providers and compare the fields
+they publish.</p>
+<p>Same Protocol - Different Cards!</p>
+<p>Why do I care what is in the Agent Card? Can't I just call the Agent?</p>
+<p>What do the field differences actually mean for a client?</p>
+<h4>What is this Approach actually Comparing?</h4>
+<p>This project fetches the agent card from every agent in a mesh, stores the exact
+bytes each server sent, and compares the fields side by side.</p>
+<p>It never invokes anything. There is no model, no prompt and no token spend in
+the measurement path. It stops at discovery.</p>
+<p>The targets are three local specimens on 127.0.0.1 and three deployed agents on
+Cloud Run, Bedrock AgentCore and Azure Container Apps. All results below were
+measured on 2026-08-25.</p>
+<h4>What is an A2A Agent Card?</h4>
+<p>The agent card is a JSON document published at a well known path. It names the
+agent, lists its skills, and declares how to reach it.</p>
+<p>It is the only thing a client reads before committing to a runtime. If two
+vendors describe the same agent differently, every routing decision downstream
+inherits that difference.</p>
+<p>The spec places the card at <code>/.well-known/agent-card.json</code>, with
+<code>/.well-known/agent.json</code> as the older path.</p>
+<h4>Why is Discovery Privileged Separately from Invocation?</h4>
+<p>Discovery is a separate permission from invocation on all three clouds. On AWS
+it is a different IAM action entirely: <code>bedrock-agentcore:GetAgentCard</code>, not
+<code>bedrock-agentcore:InvokeAgentRuntime</code>.</p>
+<p>A credential can reach the call and still fail on the card. The failure surfaces
+as a transport or protocol error, nowhere near auth.</p>
+<p>This is why the credential is attached to the httpx client rather than to a
+single request.</p>
+<h4>Tool Chain Setup</h4>
+<p>Verify that the prerequisite packages are installed - and clone the sample
+Github repo:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-01.png" alt="Code: $ git clone https://github.com/xbill9/multicloud-agentcard" /><figcaption>Code: $ git clone https://github.com/xbill9/multicloud-agentcard</figcaption></figure></p>
+<p>There is no virtualenv and nothing is pinned. The versions in use are a2a-sdk
+1.1.2, google-adk 2.6.3, httpx 0.28.1 and starlette 1.3.1, on Python 3.13.14.</p>
+<h4>Checking the Developer Environment</h4>
+<p>Once you have all the tools in place - you can test the installation:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-02.png" alt="Code: $ python3 -m pytest -q" /><figcaption>Code: $ python3 -m pytest -q</figcaption></figure></p>
+<p>The suite is hermetic. The fetcher transport is injectable, so it covers cases a
+live cloud will not produce on demand: a card served only on the older path, a
+403 carrying a real AgentCore denial, and a 200 carrying an HTML login page.</p>
+<h4>Starting the Local Card Specimens</h4>
+<p>Start with the local control, not the clouds. Two SDKs run on one machine and
+serve cards that no cloud and no model has touched:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-03.png" alt="Code: $ ./infra/run_mesh.sh start" /><figcaption>Code: $ ./infra/run_mesh.sh start</figcaption></figure></p>
+<p>The start script verifies that its own process survived, not merely that
+something answers on the port. A health check alone reports that some server
+answered, and sharing a port range with another project produces three ready
+agents and a comparison of the wrong ones.</p>
+<h4>A2A Agent Card (Cloud Run / google-adk)</h4>
+<p>The GCP agent runs on Cloud Run behind IAM. Fetch the card with an identity
+token:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-04.png" alt="Code: $ TOK=$(gcloud auth print-identity-token)" /><figcaption>Code: $ TOK=$(gcloud auth print-identity-token)</figcaption></figure></p>
+<p>The card is served at the well known path on the service hostname. Discovery is
+gated by <code>roles/run.invoker</code> at the Google Frontend.</p>
+<p>The card itself is 528 bytes:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-05.png" alt="Code: {" /><figcaption>Code: {</figcaption></figure></p>
+<p><code>to_a2a()</code> writes the bind address onto the card. On Cloud Run the process binds
+<code>0.0.0.0:8080</code>, so a public HTTPS endpoint advertises unroutable plaintext to
+every client that routes by card URL. This does not reproduce on a local mesh,
+where the bind address and the dial address are the same.</p>
+<h4>A2A Agent Card (Bedrock AgentCore / a2a-sdk)</h4>
+<p>AgentCore has no per-agent hostname. The runtime is addressed by URL escaped
+ARN, and the card sits beneath the same <code>/invocations/</code> path the calls use:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-06.png" alt="Code: https://bedrock-agentcore.us-west-2.amazonaws.com" /><figcaption>Code: https://bedrock-agentcore.us-west-2.amazonaws.com</figcaption></figure></p>
+<p>List the runtime and confirm it is ready:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-07.png" alt="Code: $ aws bedrock-agentcore-control list-agent-runtimes --region us-west-2" /><figcaption>Code: $ aws bedrock-agentcore-control list-agent-runtimes --region us-west-2</figcaption></figure></p>
+<p>The card is 2,109 bytes, four times the size of the Cloud Run card for the same
+agent:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-08.png" alt="Code: {" /><figcaption>Code: {</figcaption></figure></p>
+<p>The path shape has a consequence for any tracer. A round trip classified as
+discovery only when the path equals a known card path, or begins with
+<code>/.well-known/</code>, files every AgentCore card fetch as an invocation. The rule
+must match on the suffix.</p>
+<h4>A2A Agent Card (Container Apps / Agent Framework)</h4>
+<p>The Azure agent runs on Container Apps. Fetching the card without a credential
+returns a 401:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-09.png" alt="Code: $ curl -s -D - https://research-azure....azurecontainerapps.io/.well-k" /><figcaption>Code: $ curl -s -D - https://research-azure....azurecontainerapps.io/.well-k</figcaption></figure></p>
+<p>There is no <code>server</code> header from the application. The response comes from the
+Container Apps auth middleware, configured <code>unauthenticatedClientAction:
+Return401</code>, answering on the agent's behalf.</p>
+<p>Check the auth configuration:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-10.png" alt="Code: $ az containerapp auth show -n research-azure -g research-mesh-rg" /><figcaption>Code: $ az containerapp auth show -n research-azure -g research-mesh-rg</figcaption></figure></p>
+<p>The Agent Framework process never receives the request, so this leg contributes
+a denial row rather than a card.</p>
+<h4>Debugging API Permission Errors</h4>
+<p>Requesting a token for the Azure application from the workstation fails before
+any card is fetched:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-11.png" alt="Code: $ az account get-access-token --resource be143e2d-..." /><figcaption>Code: $ az account get-access-token --resource be143e2d-...</figcaption></figure></p>
+<p>The workstation is signed in to the correct tenant. The Azure CLI application
+has no consent to request that audience, so opening the leg requires an admin
+consent grant or a client secret.</p>
+<p>The GCP leg has a related issue. Pinning the audience is refused for a user
+account:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-12.png" alt="Code: $ gcloud auth print-identity-token --audiences=https://research-gcp-.." /><figcaption>Code: $ gcloud auth print-identity-token --audiences=https://research-gcp-..</figcaption></figure></p>
+<p>The token that comes back carries <code>aud</code> set to the gcloud OAuth client id,
+<code>32555940559.apps.googleusercontent.com</code>, and not the Cloud Run service URL.
+Cloud Run accepts it anyway, honouring the allowlisted CLI client id. The result
+proves IAM role membership only, so the tool logs a warning on every fallback.</p>
+<h4>What Fields are Actually in the Cards?</h4>
+<p>This is the full top level field inventory for the two deployed cards. The spec
+groups fields into required core, 1.0 era, legacy 0.x, and optional:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-01.png" alt="Table: category; field; Cloud Run (ADK); AgentCore (a2a-sdk)" /><figcaption>Table: category; field; Cloud Run (ADK); AgentCore (a2a-sdk)</figcaption></figure></p>
+<p>Three conclusions follow directly from that table.</p>
+<h4>Required Fields - Where the Clouds Agree</h4>
+<p>Both cards carry all seven required fields. Neither card is malformed, and a
+validator checking only the required set passes both.</p>
+<p>Every difference between these two runtimes is in optional or legacy territory.
+That is why a schema validator is not sufficient for cross cloud work, and why
+the comparison has to happen at the field level.</p>
+<h4>The 1.0 and 0.x Split</h4>
+<p>The Cloud Run card carries <code>supportedInterfaces</code> and none of the legacy keys. It
+is a clean 1.0 shape.</p>
+<p>The AgentCore card carries <code>supportedInterfaces</code> and also <code>url</code> and
+<code>preferredTransport</code>, which the 1.0 spec replaced. It is a hybrid, serving both
+generations at once.</p>
+<p>A client written for 0.x reads <code>url</code> and works against AgentCore, and finds
+nothing on Cloud Run. A client written for 1.0 reads <code>supportedInterfaces</code> and
+works against both.</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-02.png" alt="Table: client generation; Cloud Run; AgentCore" /><figcaption>Table: client generation; Cloud Run; AgentCore</figcaption></figure></p>
+<p>The hybrid card is the more compatible of the two. It is also the one that
+declares a version it does not match.</p>
+<h4>Where is protocolVersion Declared?</h4>
+<p>The two SDKs put the protocol version in opposite places:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-03.png" alt="Table: location; Cloud Run (ADK); AgentCore (a2a-sdk)" /><figcaption>Table: location; Cloud Run (ADK); AgentCore (a2a-sdk)</figcaption></figure></p>
+<p>A client that reads the top level field sees nothing from Cloud Run and <code>0.3</code>
+from AgentCore. A client that reads the per interface field sees <code>1.0</code> from
+Cloud Run and nothing from AgentCore.</p>
+<p>Both readings are wrong in one direction each. The AgentCore card declares <code>0.3</code>
+while carrying the 1.0 <code>supportedInterfaces</code> key, so trusting the declared value
+routes a client into the wrong protocol generation.</p>
+<p>The reliable test is structural. Branch on the presence of
+<code>supportedInterfaces</code>, not on any declared version string.</p>
+<h4>Capabilities - Absent is not False</h4>
+<p>The <code>capabilities</code> object differs by one key:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-04.png" alt="Table: capability; Cloud Run (ADK); AgentCore (a2a-sdk)" /><figcaption>Table: capability; Cloud Run (ADK); AgentCore (a2a-sdk)</figcaption></figure></p>
+<p>Cloud Run states that push notifications are unsupported. AgentCore says
+nothing.</p>
+<p>For a client these are different answers. An explicit <code>false</code> is a commitment,
+and an absent key is an unknown that a strict client has to probe or assume. Two
+agents with identical behaviour are described with different degrees of
+confidence.</p>
+<h4>Skills - What Counts as a Skill?</h4>
+<p>Both cards carry exactly one skill with the same four keys, and the values have
+almost nothing in common:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-05.png" alt="Table: skill field; Cloud Run (ADK); AgentCore (a2a-sdk)" /><figcaption>Table: skill field; Cloud Run (ADK); AgentCore (a2a-sdk)</figcaption></figure></p>
+<p>The <code>id</code> fields name different things. ADK uses the agent name, so the skill id
+and the agent name are the same string. AgentCore uses the capability name.</p>
+<p>The <code>name</code> fields are not comparable at all. ADK emits the literal string
+<code>custom</code>, which is a category rather than a label. AgentCore emits a human
+readable name.</p>
+<p>The <code>description</code> fields diverge the most. ADK repeats the agent description.
+AgentCore publishes the agent's entire system prompt, 1,258 characters of
+instruction text, and the tags name the model behind it.</p>
+<p>A router selecting agents by skill description is reading a one line summary
+from one cloud and a full system prompt from the other. Ranking those by text
+similarity compares documents of different kinds.</p>
+<h4>Which Fields Come from the SDK and Which from the Author?</h4>
+<p>Not every difference is the runtime's doing. The same a2a-sdk version produces
+different fields in two deployments:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-13.png" alt="Code: local    aws skills[0]: description, examples, id, inputModes, name, o" /><figcaption>Code: local    aws skills[0]: description, examples, id, inputModes, name, o</figcaption></figure></p>
+<p>The local specimen sets <code>examples</code>, <code>inputModes</code> and <code>outputModes</code>. The deployed
+agent does not. <code>documentationUrl</code> behaves the same way, present locally and
+absent when deployed.</p>
+<p>So card richness has two independent sources. Structural fields such as
+<code>protocolVersion</code> placement, <code>url</code> and <code>preferredTransport</code> come from the SDK.
+Descriptive fields such as <code>examples</code>, <code>inputModes</code> and <code>documentationUrl</code> come
+from whoever wrote the agent.</p>
+<p>Attributing a missing <code>examples</code> array to the cloud is a mistake. Attributing a
+missing <code>url</code> key to the author is also a mistake.</p>
+<h4>What is Missing from Every Card</h4>
+<p>Six optional fields are absent from both deployed cards:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-06.png" alt="Table: field; what a client loses" /><figcaption>Table: field; what a client loses</figcaption></figure></p>
+<p>The first two matter most. Both agents return 401 or 403 without a credential,
+and neither card declares a security scheme. A client that discovers either
+agent learns nothing from the card about why its next request will be rejected.</p>
+<p>The absence of <code>signatures</code> means an agent card is an unauthenticated claim. Any
+party able to serve that path can assert any capability.</p>
+<h4>What the Field Differences Mean for a Client</h4>
+<p>Collecting the field analysis into the decisions a client actually makes:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-07.png" alt="Table: client decision; field it reads; Cloud Run; AgentCore; safe approach" /><figcaption>Table: client decision; field it reads; Cloud Run; AgentCore; safe approach</figcaption></figure></p>
+<p>Two of these are actively dangerous rather than merely incomplete. Routing by
+the Cloud Run card URL sends traffic to <code>0.0.0.0:8080</code>. Trusting the AgentCore
+declared protocol version selects 0.3 semantics for a 1.0 shaped card.</p>
+<h4>Time to Start Comparing some Cards!</h4>
+<p>One command dials every peer, reviews each card, contrasts the results and
+stores the run:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-14.png" alt="Code: $ agentcard fetch --save" /><figcaption>Code: $ agentcard fetch --save</figcaption></figure></p>
+<p>The local mesh reproduces the same split. The gcp specimen runs google-adk and
+produces the 1.0 shape. The other two run a2a-sdk and produce the hybrid shape.</p>
+<p>The agents are identical echo agents, so the shape difference is the SDK.</p>
+<h4>Results</h4>
+<p>Point the tool at a peers file and fetch the deployed agents:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-15.png" alt="Code: $ agentcard --corpus-dir .cards-deployed fetch --peers-file peers.toml" /><figcaption>Code: $ agentcard --corpus-dir .cards-deployed fetch --peers-file peers.toml</figcaption></figure></p>
+<p>Two of three answered. The Azure leg stays in the corpus as a row rather than a
+gap, because a blank column reads as disagreement with every other peer, which
+is the opposite of what a denial means.</p>
+<p>The run produced six findings:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-08.png" alt="Table: sev; peer; code; detail" /><figcaption>Table: sev; peer; code; detail</figcaption></figure></p>
+<h4>A Card that Changed</h4>
+<p>Five runs of the same peer, at the same endpoint, with the same credential,
+across three and a half hours:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-09.png" alt="Table: run; time (UTC); version; skills; bytes" /><figcaption>Table: run; time (UTC); version; skills; bytes</figcaption></figure></p>
+<p>Three runs sit on one side and two on the other, and each group is byte for byte
+stable. The card lost two thirds of its bytes and three of its four skills, and
+the <code>version</code> field did not move.</p>
+<p>The flattened composition is what was removed:</p>
+<p>![Code: 05bb15448c63 -&gt; <a href="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-16.png">'research_agent',</a></p>
+<p>A client that discovered this agent at 16:01 and cached "it can search the web"
+held a claim the card no longer made by 17:17.</p>
+<p>The review output is identical across the change. Diffing the two defect blocks
+produces no output:</p>
+<pre><code class="language-console">$ diff &lt;(agentcard replay 05bb15448c63) &lt;(agentcard replay 07f23fc6df3f)
+</code></pre>
+<p>Both runs report 1 error and 2 warnings on this peer, and the same six defects
+run wide at the same severities. A checker that asks only whether a card is
+conformant reports no difference, because on that question there is none.</p>
+<h4>Gating on Drift</h4>
+<p>Conformance and change are different questions, so they use different exit
+codes:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-17.png" alt="Code: $ agentcard fetch --save --fail-on-change" /><figcaption>Code: $ agentcard fetch --save --fail-on-change</figcaption></figure></p>
+<p>Restarting a specimen so it advertises a different URL produces exit 0 from
+<code>--fail-on-defect</code> and exit 4 from <code>--fail-on-change</code>.</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-10.png" alt="Table: exit; meaning" /><figcaption>Table: exit; meaning</figcaption></figure></p>
+<p>Exit 3 is distinct from 1 and 2. A harness must separate an instrument failure
+from a working instrument reporting bad news.</p>
+<p>A peer name is not an identity. The local specimens and the deployed agents are
+both named gcp, aws and azure, so a corpus holding both would compare a local
+specimen against Cloud Run and report it as vendor drift. A peer whose endpoint
+changed prints as <code>[not compared]</code> and does not trip the gate.</p>
+<h4>Discovery Cost</h4>
+<p>A card fetched over a federated credential costs round trips to another cloud
+identity provider first, and arrives byte identical to one fetched from an open
+port:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-11.png" alt="Table: peer; auth; keyless; round trips; discovery ms" /><figcaption>Table: peer; auth; keyless; round trips; discovery ms</figcaption></figure></p>
+<p>The local mesh answers in 55 ms. The deployed run takes 25 seconds, and almost
+all of it is the Azure Container App cold starting to return a 401.</p>
+<h4>Validating the Results</h4>
+<p>Each result was re-checked with curl and python3, independent of the tool:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-12.png" alt="Table: result; validation method; outcome" /><figcaption>Table: result; validation method; outcome</figcaption></figure></p>
+<p>The replay path is tested by removing the network. Stop every server, confirm
+nothing is listening, then replay a run that fetched three cards:</p>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-18.png" alt="Code: $ ss -ltn | grep -c '1100[123]'" /><figcaption>Code: $ ss -ltn | grep -c '1100[123]'</figcaption></figure></p>
+<p>Three cards are reviewed with every server down.</p>
+<h4>Final Results</h4>
+<p><figure><img src="https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-13.png" alt="Table: approach; catches invalid cards; catches field divergence; catches drift; cost" /><figcaption>Table: approach; catches invalid cards; catches field divergence; catches drift; cost</figcaption></figure></p>
+<p>Both deployed cards are valid. Every meaningful difference between them sits in
+optional and legacy fields that a schema validator does not examine, which is
+the gap a field level comparison fills.</p>
+<h4>Summary</h4>
+<p>The goal of this article was to fetch A2A agent cards from multiple clouds and
+compare the fields they publish. The key to the solution was storing the exact
+bytes each server returned and comparing every field at every nesting level.
+Three local specimens and three remote agents were presented, covering two A2A
+SDKs and three deployment clouds. Finally, a drift gate was added to compare
+each run against the previous stored corpus.</p>
+<p>The field comparison produced these results:</p>
+<ul>
+<li>Both deployed cards carry all seven required fields, so both are valid and
+  every difference sits in optional or legacy territory.</li>
+<li>The AgentCore card is a hybrid, carrying the 1.0 <code>supportedInterfaces</code> and the
+  0.x <code>url</code> and <code>preferredTransport</code> together. The Cloud Run card is clean 1.0.</li>
+<li>The two SDKs declare <code>protocolVersion</code> in opposite places, and the AgentCore
+  value of 0.3 contradicts the 1.0 shape of the card it appears on.</li>
+<li><code>capabilities</code> differ by one key, and an absent key is not the same answer as
+  an explicit false.</li>
+<li>The <code>skills</code> fields carry different meanings on each cloud. ADK emits the
+  literal name <code>custom</code> and a one line description, and AgentCore emits a human
+  name, a 1,258 character system prompt and the model id.</li>
+<li>Card richness has two sources. Structural fields come from the SDK, and
+  descriptive fields come from the agent author.</li>
+<li>Six optional fields are absent from both cards, including <code>securitySchemes</code> on
+  two agents that both require credentials, and <code>signatures</code> on both.</li>
+<li>A live card changed with no version bump, and the conformance review was
+  identical on both sides of the change.</li>
+</ul>
+<p>Cards change without notice and without a version bump, so every result in this
+article names the date it was measured on.</p>
+<p>The code is at
+<a href="https://github.com/xbill9/multicloud-agentcard">xbill9/multicloud-agentcard</a>.</p>
+</body>
+</html>

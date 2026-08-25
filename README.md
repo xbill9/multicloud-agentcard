@@ -119,6 +119,15 @@ Drift is measured against the **last saved run**, so `--save` accepts the
 current cards as the new baseline. Without it the same drift is re-reported
 every run until something stores it.
 
+**A peer name is not an identity.** The local specimens and the deployed agents
+are both called `gcp`, `aws` and `azure`, so a corpus holding both would diff a
+laptop specimen against Cloud Run and call it vendor drift — measured on
+2026-08-25, four fields on two peers, exit 4, with nothing in the output able
+to say the two runs were of different servers. That is the same failure as the
+health check in `CLAUDE.md`'s opening. A peer whose **endpoint** moved is now
+printed as `[not compared]`, names both endpoints, and never trips the gate:
+the card of a different server is not a changed card.
+
 | exit | meaning |
 |---|---|
 | 0 | ran, nothing gated |
@@ -305,7 +314,7 @@ explicit mode so a peers file can configure this per peer.
 ## Testing
 
 ```bash
-python3 -m pytest -q      # 115 passed
+python3 -m pytest -q      # 118 passed
 ruff check .              # all checks passed
 ```
 

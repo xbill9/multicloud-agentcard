@@ -196,11 +196,11 @@ def _report_drift(previous: Corpus | None, current: Corpus) -> bool:
     if not changes:
         return False
     print(f"\ndrift since {previous.run_id}:")
-    for peer, entries in changes.items():
-        print(f"  {peer}:")
-        for entry in entries:
+    for peer, diff in changes.items():
+        print(f"  {peer}:" if diff.comparable else f"  {peer}:  [not compared]")
+        for entry in diff.entries:
             print(f"    {entry}")
-    return True
+    return any(d.comparable for d in changes.values())
 
 
 def _load_or_exit(ref: str, directory: Path) -> Corpus:
@@ -255,11 +255,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"no card changed between {old.run_id} and {new.run_id}")
             return 0
         print(f"{old.run_id} -> {new.run_id}")
-        for peer, entries in changes.items():
-            print(f"  {peer}:")
-            for entry in entries:
+        for peer, diff in changes.items():
+            print(f"  {peer}:" if diff.comparable else f"  {peer}:  [not compared]")
+            for entry in diff.entries:
                 print(f"    {entry}")
-        return DRIFT_EXIT if args.fail_on_change else 0
+        drifted = any(d.comparable for d in changes.values())
+        return DRIFT_EXIT if (args.fail_on_change and drifted) else 0
 
     if args.command == "replay":
         corpus = _load_or_exit(args.run, directory) if args.run else _latest_or_exit(directory)

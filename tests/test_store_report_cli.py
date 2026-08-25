@@ -65,7 +65,7 @@ def test_diff_names_the_fields_that_changed(hybrid_card):
     del after["documentationUrl"]
     after["version"] = "2.0.0"
     changes = store.diff_specimens(_corpus(("aws", hybrid_card)), _corpus(("aws", after)))
-    entries = changes["aws"]
+    entries = changes["aws"].entries
     assert any("fields added: iconUrl" in e for e in entries)
     assert any("fields removed: documentationUrl" in e for e in entries)
     assert any("version changed" in e for e in entries)
@@ -77,7 +77,7 @@ def test_diff_is_silent_when_nothing_changed(hybrid_card):
 
 def test_diff_reports_a_card_becoming_unreachable(hybrid_card):
     changes = store.diff_specimens(_corpus(("aws", hybrid_card)), _corpus(("aws", None)))
-    assert any("no longer retrievable" in e for e in changes["aws"])
+    assert any("no longer retrievable" in e for e in changes["aws"].entries)
 
 
 # --- report ----------------------------------------------------------------
@@ -289,3 +289,66 @@ def test_the_first_run_ever_has_nothing_to_drift_from(capsys, hybrid_card):
 
     assert _report_drift(None, _corpus(("aws", hybrid_card))) is False
     assert capsys.readouterr().out == ""
+
+
+def test_the_same_peer_name_at_a_different_endpoint_is_not_drift(hybrid_card):
+    """A peer name is not an identity.
+
+    The local specimens and the deployed agents are both called gcp/aws/azure.
+    A corpus holding both used to diff a laptop specimen against Cloud Run and
+    report that the vendor had changed its card -- measured 2026-08-25, four
+    fields on two peers, exit 4. The card of a different server is not a
+    changed card.
+    """
+    old = _corpus(("aws", hybrid_card))
+    new = Corpus(
+        run_id="r2",
+        started_at=old.started_at,
+        elapsed_ms=1,
+        specimens=[
+            Specimen(
+                peer="aws",
+                endpoint="https://somewhere-else.example",
+                runtime="test",
+                raw=json.dumps(dict(hybrid_card, name="totally different")),
+                card=dict(hybrid_card, name="totally different"),
+                status=200,
+            )
+        ],
+    )
+    diff = store.diff_specimens(old, new)["aws"]
+    assert diff.comparable is False
+    assert "not the same server" in diff.entries[0]
+    assert "somewhere-else.example" in diff.entries[0]
+
+
+def test_an_incomparable_peer_does_not_trip_the_gate(tmp_path, hybrid_card, capsys):
+    from cards.cli import _report_drift
+
+    old = _corpus(("aws", hybrid_card), run_id="aaa111")
+    new = Corpus(
+        run_id="bbb222",
+        started_at=old.started_at,
+        elapsed_ms=1,
+        specimens=[
+            Specimen(
+                peer="aws",
+                endpoint="https://somewhere-else.example",
+                runtime="test",
+                raw='{"name":"other"}',
+                card={"name": "other"},
+                status=200,
+            )
+        ],
+    )
+    # Reported -- silence would be its own bug -- but not gated.
+    assert _report_drift(old, new) is False
+    out = capsys.readouterr().out
+    assert "not compared" in out
+    assert "not the same server" in out
+
+
+def test_a_new_peer_is_reported_but_not_gated(hybrid_card):
+    diff = store.diff_specimens(_corpus(), _corpus(("aws", hybrid_card)))["aws"]
+    assert diff.entries == ["new peer in this run"]
+    assert diff.comparable is False

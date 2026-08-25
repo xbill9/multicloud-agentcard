@@ -14,6 +14,7 @@ That is only visible against a copy of the old one.
 
 import json
 import os
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -97,7 +98,29 @@ def latest(directory: Path | str = DEFAULT_DIR) -> Corpus | None:
     return load(runs[-1]) if runs else None
 
 
-def diff_specimens(old: Corpus, new: Corpus) -> dict[str, list[str]]:
+@dataclass(frozen=True)
+class PeerDiff:
+    """What moved for one peer, and whether that counts as the card drifting.
+
+    ``comparable`` is the whole reason this is not a bare list of strings. A
+    peer name is not an identity: the local specimens and the deployed agents
+    are both called ``gcp``, ``aws`` and ``azure``, so a corpus holding both
+    will happily "diff" a laptop specimen against Cloud Run and report that the
+    vendor changed its card. Measured on 2026-08-25: a local run stored after a
+    deployed run reported name, description, skills and supportedInterfaces all
+    changed on two peers, and exited 4. Nothing in that output could have said
+    the two runs were of different servers.
+
+    This is the same failure as the one in ``CLAUDE.md``'s opening -- a health
+    check that reached another project's mesh and reported three agents ready.
+    A comparison that cannot tell whose card it read is not a comparison.
+    """
+
+    entries: list[str]
+    comparable: bool = True
+
+
+def diff_specimens(old: Corpus, new: Corpus) -> dict[str, PeerDiff]:
     """What changed per peer between two runs, at the level of card keys.
 
     Deliberately shallow. A deep structural diff of two cards is a solved
@@ -105,14 +128,30 @@ def diff_specimens(old: Corpus, new: Corpus) -> dict[str, list[str]]:
     forty reordered skill tags. Key presence and a raw-body checksum answer
     "did this card change, and roughly where" -- and the stored bodies are
     right there when the answer is yes.
+
+    A peer whose endpoint moved is reported and marked ``comparable=False``:
+    the card of a different server is not a changed card, and gating on it
+    would fail a build for a corpus that merely holds two meshes.
     """
     before = {s.peer: s for s in old.specimens}
-    changes: dict[str, list[str]] = {}
+    changes: dict[str, PeerDiff] = {}
     for specimen in new.specimens:
         was = before.get(specimen.peer)
         entries: list[str] = []
         if was is None:
-            changes[specimen.peer] = ["new peer in this run"]
+            changes[specimen.peer] = PeerDiff(["new peer in this run"], comparable=False)
+            continue
+        if was.endpoint != specimen.endpoint:
+            changes[specimen.peer] = PeerDiff(
+                [
+                    (
+                        "not the same server: this peer name pointed at "
+                        f"{was.endpoint} and now points at {specimen.endpoint}. "
+                        "Card differences below are not drift and are not gated."
+                    )
+                ],
+                comparable=False,
+            )
             continue
         if was.raw == specimen.raw:
             continue
@@ -132,7 +171,7 @@ def diff_specimens(old: Corpus, new: Corpus) -> dict[str, list[str]]:
                     entries.append(f"{key} changed")
         if not entries:
             entries.append("body changed with no change to any key")
-        changes[specimen.peer] = entries
+        changes[specimen.peer] = PeerDiff(entries)
     return changes
 
 

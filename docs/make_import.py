@@ -54,6 +54,15 @@ td, th { border-bottom: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left
 def build() -> Path:
     md = (DOCS / "medium-draft.md").read_text()
 
+    # Point the images at the Pages site rather than raw.githubusercontent, so
+    # every image is same-origin with the page the importer is reading. The
+    # markdown keeps the raw.githubusercontent URLs, which survive Pages being
+    # turned off; the importer gets the copy it is most likely to follow.
+    md = md.replace(
+        "https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs",
+        SITE,
+    )
+
     html_body = markdown.markdown(md, extensions=["tables", "fenced_code"])
 
     # Wrap each image in a figure with its alt text as a plain-text caption.

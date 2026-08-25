@@ -42,6 +42,27 @@ what makes them expensive.
   pointing at a stable page serves that page's cached copy whatever URL was
   submitted. Strip it from the copy handed to the importer.
 
+Two more, measured here on 2026-08-25 against the live importer, both silent:
+
+- **A `<figure>` nested inside a `<p>` loses every figure.** python-markdown
+  wraps a standalone image line in a paragraph, so substituting the `<img>` in
+  place produces `<p><figure>...</figure></p>`. That nesting is invalid, a
+  parser closes the paragraph at the figure's start tag, and the importer
+  discards what is left. Two imports arrived with the prose and all 54 headings
+  intact and **all 31 figures missing**. `make_import.py` matches the whole
+  enclosing paragraph for this reason.
+- **An unbalanced bracket in alt text drops that one image.** The generated alt
+  `Code: 05bb15448c63 -> ['research_agent',` stops python-markdown treating the
+  reference as an image at all, so it stays literal text and no figure is
+  emitted. One figure of 32 went missing this way, and nothing in the markdown
+  looks wrong. `make_medium.py` now strips brackets and parentheses from
+  generated alt text.
+
+Counting figures in Medium's editor needs care. The editor lazy-loads and
+virtualises, so DOM counts lie until the whole document has been scrolled. And
+imported content is served from `0*` image URLs while Medium's own editor chrome
+is `1*`, so count only `0*` or the onboarding overlay inflates the total.
+
 Images are the one thing Medium handles well. It fetches them, rehosts at 800px,
 and takes `<figcaption>` as the caption. The **first image in the body becomes
 the story's cover**, which is why the header image is the first line after the

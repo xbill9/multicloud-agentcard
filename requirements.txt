@@ -1,0 +1,19 @@
+# What a source deploy of the card specimens installs. The Cloud Run Python
+# buildpack reads this file and nothing else -- it does not read pyproject.toml
+# -- so this is a second dependency list by necessity rather than by choice.
+#
+# Nothing is pinned. See CLAUDE.md: the one legitimate reason to pin is a
+# measured failure that names itself in a comment, and there is currently none.
+a2a-sdk[http-server]
+google-adk
+pydantic
+httpx
+starlette
+uvicorn
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-httpx
+opentelemetry-instrumentation-logging
+opentelemetry-instrumentation-starlette
+opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-gcp-trace

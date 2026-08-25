@@ -1,0 +1,45 @@
+{
+  "capabilities": {
+    "streaming": false
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "description": "A minimal A2A agent that exists to be discovered: it publishes a card and echoes whatever it is sent",
+  "documentationUrl": "https://github.com/xbill9/multicloud-agentcard",
+  "name": "card_specimen",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3",
+  "skills": [
+    {
+      "description": "Return the text it was given, unchanged",
+      "examples": [
+        "ping"
+      ],
+      "id": "echo",
+      "inputModes": [
+        "text/plain"
+      ],
+      "name": "echo",
+      "outputModes": [
+        "text/plain"
+      ],
+      "tags": [
+        "echo",
+        "diagnostic",
+        "cloud:aws"
+      ]
+    }
+  ],
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "url": "http://127.0.0.1:11002"
+    }
+  ],
+  "url": "http://127.0.0.1:11002",
+  "version": "1.0.0"
+}

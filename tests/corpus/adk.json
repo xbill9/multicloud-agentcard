@@ -1,0 +1,32 @@
+{
+  "capabilities": {
+    "pushNotifications": false,
+    "streaming": false
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "description": "A minimal A2A agent that exists to be discovered: it publishes a card and echoes whatever it is sent. Return the text it was given, unchanged.",
+  "name": "card_specimen",
+  "skills": [
+    {
+      "description": "A minimal A2A agent that exists to be discovered: it publishes a card and echoes whatever it is sent. Return the text it was given, unchanged.",
+      "id": "card_specimen",
+      "name": "custom",
+      "tags": [
+        "custom_agent"
+      ]
+    }
+  ],
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0",
+      "url": "http://127.0.0.1:11001"
+    }
+  ],
+  "version": "0.0.1"
+}

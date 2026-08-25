@@ -1,0 +1,42 @@
+# Copy to peers.toml and point it wherever you like.
+#
+#   agentcard fetch --peers-file peers.toml
+#
+# Naming any peer here suppresses the built-in three. Add them back with
+# --builtin gcp (repeatable) if you want both.
+#
+# `auth` is one of: none, google-id-token, aws-sigv4, entra-fic, gcp-wif-aws,
+# entra-client-secret. Omit it and the peer falls back to <NAME>_A2A_AUTH in
+# the environment, which is how the built-in three are configured.
+#
+# Every mode except `none` needs a workload OIDC token minted at the GCE
+# metadata server. See "Reaching the deployed three" in README.md -- from a
+# workstation there is not one.
+
+[[peer]]
+name = "gcp"
+endpoint = "https://research-gcp-wgcq55zbfq-uc.a.run.app"
+runtime = "Cloud Run / ADK to_a2a"
+auth = "google-id-token"
+
+[[peer]]
+name = "aws"
+# AgentCore serves the card from the same /invocations/ path the calls use.
+endpoint = "https://bedrock-agentcore.us-west-2.amazonaws.com/runtimes/<escaped-arn>/invocations/"
+runtime = "Bedrock AgentCore"
+auth = "aws-sigv4"
+
+[[peer]]
+name = "azure"
+endpoint = "https://research-azure.<region>.azurecontainerapps.io"
+runtime = "Container Apps / Agent Framework"
+auth = "entra-fic"
+
+# Anything else. A public agent needs no credential and no configuration
+# beyond its URL, which is the case worth keeping easy.
+#
+# [[peer]]
+# name = "public-demo"
+# endpoint = "https://example.org/agent"
+# auth = "none"
+# tags = ["third-party"]

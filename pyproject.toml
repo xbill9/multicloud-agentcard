@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multicloud-agentcard"
+version = "0.1.0"
+description = "Pull A2A agent cards from remote native agents on three clouds, and read what comes back"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "pydantic",
+  "httpx",
+  # Telemetry is a dependency of every process, not an extra: the API is a
+  # no-op without an exporter, so carrying it costs nothing and leaving it
+  # optional means the one deployment that needed traces is the one that did
+  # not have them installed.
+  "opentelemetry-api",
+  "opentelemetry-sdk",
+  "opentelemetry-instrumentation-httpx",
+  "opentelemetry-instrumentation-logging",
+  "opentelemetry-instrumentation-starlette",
+  "opentelemetry-exporter-otlp-proto-http",
+]
+
+[project.scripts]
+agentcard = "cards.cli:main"
+
+[project.optional-dependencies]
+# The fetcher itself needs no vendor SDK -- it is httpx and json, on purpose.
+# These are for the local card specimens, which are what the fetcher is
+# exercised against without spending anything.
+specimens = ["a2a-sdk[http-server]", "google-adk", "starlette", "uvicorn"]
+dev = ["pytest", "pytest-asyncio", "ruff"]
+
+[tool.setuptools.packages.find]
+include = ["cards*", "peers*", "agents*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"

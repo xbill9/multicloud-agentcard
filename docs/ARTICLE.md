@@ -1,25 +1,26 @@
-# Cross Cloud A2A Agent Card Discovery
+# Cross Cloud A2A Agent Card Field Comparison
 
-Building an Agent Card Reader with A2A - This tutorial aims to fetch and compare
-agent cards from A2A agents deployed across several mainstream Cloud providers.
+Comparing Agent Cards with A2A - This tutorial aims to fetch the agent card from
+A2A agents running on several mainstream Cloud providers and compare the fields
+they publish.
 
 Same Protocol - Different Cards!
 
-Why would I need to read the Agent Card? Can't I just call the Agent?
+Why do I care what is in the Agent Card? Can't I just call the Agent?
 
-What is this Approach actually Comparing?
+What do the field differences actually mean for a client?
 
 ## What is this Approach actually Comparing?
 
 This project fetches the agent card from every agent in a mesh, stores the exact
-bytes each server sent, and reads them side by side.
+bytes each server sent, and compares the fields side by side.
 
 It never invokes anything. There is no model, no prompt and no token spend in
 the measurement path. It stops at discovery.
 
-The comparison targets are three local specimens on 127.0.0.1 and three deployed
-agents on Cloud Run, Bedrock AgentCore and Azure Container Apps. All results
-below were measured on 2026-08-25.
+The targets are three local specimens on 127.0.0.1 and three deployed agents on
+Cloud Run, Bedrock AgentCore and Azure Container Apps. All results below were
+measured on 2026-08-25.
 
 ## What is an A2A Agent Card?
 
@@ -56,7 +57,8 @@ $ cd multicloud-agentcard
 $ uv pip install --system -e '.[specimens,dev]'
 ```
 
-There is no virtualenv and nothing is pinned.
+There is no virtualenv and nothing is pinned. The versions in use are a2a-sdk
+1.1.2, google-adk 2.6.3, httpx 0.28.1 and starlette 1.3.1, on Python 3.13.14.
 
 ## Checking the Developer Environment
 
@@ -73,9 +75,6 @@ All checks passed!
 The suite is hermetic. The fetcher transport is injectable, so it covers cases a
 live cloud will not produce on demand: a card served only on the older path, a
 403 carrying a real AgentCore denial, and a 200 carrying an HTML login page.
-
-The versions in use are a2a-sdk 1.1.2, google-adk 2.6.3, httpx 0.28.1 and
-starlette 1.3.1, on Python 3.13.14.
 
 ## Starting the Local Card Specimens
 
@@ -94,90 +93,14 @@ waiting for health...
 ```
 
 The start script verifies that its own process survived, not merely that
-something answers on the port. A health check alone reports only that some
-server answered, and sharing a port range with another project produces three
-ready agents and a comparison of the wrong ones.
-
-## A2A Agent Card (google-adk Local)
-
-The first specimen runs google-adk `to_a2a()`. Retrieve the card directly:
-
-```console
-$ curl -s http://127.0.0.1:11001/.well-known/agent-card.json
-{
-  "capabilities": { "pushNotifications": false, "streaming": false },
-  "defaultInputModes": ["text/plain"],
-  "defaultOutputModes": ["text/plain"],
-  "description": "A minimal A2A agent that exists to be discovered...",
-  "name": "card_specimen",
-  "skills": [{ "description": "A minimal A2A agent...",
-               "id": "card_specimen", "name": "custom",
-               "tags": ["custom_agent"] }],
-  "supportedInterfaces": [{ "protocolBinding": "JSONRPC",
-                            "protocolVersion": "1.0",
-                            "url": "http://127.0.0.1:11001" }],
-  "version": "0.0.1"
-}
-```
-
-Note the placement of `protocolVersion`. It appears inside the interface entry
-and nowhere else.
-
-## A2A Agent Card (a2a-sdk Local)
-
-The second specimen runs the a2a-sdk reference routes. The same agent behaviour
-produces a different card:
-
-```console
-$ curl -s http://127.0.0.1:11002/.well-known/agent-card.json
-{
-  "capabilities": { "streaming": false },
-  "defaultInputModes": ["text/plain"],
-  "defaultOutputModes": ["text/plain"],
-  "description": "A minimal A2A agent that exists to be discovered",
-  "documentationUrl": "https://github.com/xbill9/multicloud-agentcard",
-  "name": "card_specimen",
-  "preferredTransport": "JSONRPC",
-  "protocolVersion": "0.3",
-  "skills": [{ "description": "Return the text it was given, unchanged",
-               "examples": ["ping"], "id": "echo", "name": "echo",
-               "tags": ["echo", "diagnostic", "cloud:aws"] }],
-  "supportedInterfaces": [{ "protocolBinding": "JSONRPC",
-                            "url": "http://127.0.0.1:11002" }],
-  "url": "http://127.0.0.1:11002",
-  "version": "1.0.0"
-}
-```
-
-Here `protocolVersion` appears at the top level and is absent from the
-interface. The two SDKs declare it in opposite places.
-
-This card also carries four keys the ADK card does not have at all: `url`,
-`preferredTransport`, `documentationUrl` and `protocolVersion`.
-
-## So What is all this Doing?
-
-The fetcher stores the exact body each server sent. Every later step is a
-function of those bytes plus the HTTP metadata.
-
-Parsing early discards the finding. A field a vendor spells differently, an
-extra key no client models, or a body that is not JSON at all survives as
-evidence only when the bytes are kept.
-
-Findings are split into three severities:
-
-| severity | meaning | example |
-|---|---|---|
-| error | the card is wrong now | bind-address-on-card |
-| warning | legal, but a client will trip on it | version-shape-mismatch |
-| note | true, not a defect, and the comparison itself | version-per-interface |
-
-Notes are separated from defects so the defects stay findable.
+something answers on the port. A health check alone reports that some server
+answered, and sharing a port range with another project produces three ready
+agents and a comparison of the wrong ones.
 
 ## A2A Agent Card (Cloud Run / google-adk)
 
-The deployed GCP agent runs on Cloud Run behind IAM. Retrieve the endpoint and
-fetch the card with an identity token:
+The GCP agent runs on Cloud Run behind IAM. Fetch the card with an identity
+token:
 
 ```console
 $ TOK=$(gcloud auth print-identity-token)
@@ -192,21 +115,29 @@ server: Google Frontend
 The card is served at the well known path on the service hostname. Discovery is
 gated by `roles/run.invoker` at the Google Frontend.
 
-Inspecting the card shows the interface URL:
+The card itself is 528 bytes:
 
-```console
-  supportedInterfaces url  : ['http://0.0.0.0:8080']
-  securitySchemes present  : False
-  top-level protocolVersion: None
-  per-interface version    : ['1.0']
+```json
+{
+  "capabilities": { "pushNotifications": false, "streaming": false },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "description": "An agent that writes a short, sourced research brief",
+  "name": "research_agent",
+  "skills": [{ "description": "An agent that writes a short, sourced...",
+               "id": "research_agent", "name": "custom",
+               "tags": ["custom_agent"] }],
+  "supportedInterfaces": [{ "protocolBinding": "JSONRPC",
+                            "protocolVersion": "1.0",
+                            "url": "http://0.0.0.0:8080" }],
+  "version": "0.0.1"
+}
 ```
 
 `to_a2a()` writes the bind address onto the card. On Cloud Run the process binds
 `0.0.0.0:8080`, so a public HTTPS endpoint advertises unroutable plaintext to
-every client that routes by card URL.
-
-This does not reproduce on a local mesh, where the bind address and the dial
-address are the same. It requires a deployment.
+every client that routes by card URL. This does not reproduce on a local mesh,
+where the bind address and the dial address are the same.
 
 ## A2A Agent Card (Bedrock AgentCore / a2a-sdk)
 
@@ -228,9 +159,33 @@ $ aws bedrock-agentcore-control list-agent-runtimes --region us-west-2
     "status": "READY" } ]
 ```
 
+The card is 2,109 bytes, four times the size of the Cloud Run card for the same
+agent:
+
+```json
+{
+  "capabilities": { "streaming": false },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "description": "An agent that writes a short, sourced research brief",
+  "name": "research_agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3",
+  "skills": [{ "description": "You are a research assistant with a
+                               web_search tool...",
+               "id": "research_brief", "name": "research brief",
+               "tags": ["research","writing","analysis","brain:llm",
+                        "model:us.amazon.nova-micro-v1:0"] }],
+  "supportedInterfaces": [{ "protocolBinding": "JSONRPC",
+                            "url": "https://bedrock-agentcore..." }],
+  "url": "https://bedrock-agentcore...",
+  "version": "0.1.0"
+}
+```
+
 The path shape has a consequence for any tracer. A round trip classified as
 discovery only when the path equals a known card path, or begins with
-`/.well-known/`, will file every AgentCore card fetch as an invocation. The rule
+`/.well-known/`, files every AgentCore card fetch as an invocation. The rule
 must match on the suffix.
 
 ## A2A Agent Card (Container Apps / Agent Framework)
@@ -259,8 +214,8 @@ $ az containerapp auth show -n research-azure -g research-mesh-rg
     "validation": { "allowedAudiences": [ "be143e2d-..." ] } } }
 ```
 
-The Agent Framework process never receives the request. Its card producer is
-taken from the deployment configuration.
+The Agent Framework process never receives the request, so this leg contributes
+a denial row rather than a card.
 
 ## Debugging API Permission Errors
 
@@ -274,9 +229,9 @@ application with ID '04b07795-8ddb-461a-bbee-02f9e1bf7b46' named
 'Microsoft Azure CLI'.
 ```
 
-This is not a missing credential. The workstation is signed in to the correct
-tenant. The Azure CLI application has no consent to request that audience, so
-opening the leg requires an admin consent grant or a client secret.
+The workstation is signed in to the correct tenant. The Azure CLI application
+has no consent to request that audience, so opening the leg requires an admin
+consent grant or a client secret.
 
 The GCP leg has a related issue. Pinning the audience is refused for a user
 account:
@@ -289,16 +244,195 @@ ERROR: (gcloud.auth.print-identity-token) Invalid account type for
 
 The token that comes back carries `aud` set to the gcloud OAuth client id,
 `32555940559.apps.googleusercontent.com`, and not the Cloud Run service URL.
-Cloud Run accepts it anyway, honouring the allowlisted CLI client id.
+Cloud Run accepts it anyway, honouring the allowlisted CLI client id. The result
+proves IAM role membership only, so the tool logs a warning on every fallback.
 
-The card arrives and the audience condition is never checked. The result proves
-IAM role membership only, so the tool logs a warning naming this on every
-fallback.
+## What Fields are Actually in the Cards?
 
-| workstation mode | what it proves | what it does not prove |
+This is the full top level field inventory for the two deployed cards. The spec
+groups fields into required core, 1.0 era, legacy 0.x, and optional:
+
+| category | field | Cloud Run (ADK) | AgentCore (a2a-sdk) |
+|---|---|---|---|
+| required | capabilities | yes | yes |
+| required | defaultInputModes | yes | yes |
+| required | defaultOutputModes | yes | yes |
+| required | description | yes | yes |
+| required | name | yes | yes |
+| required | skills | yes | yes |
+| required | version | yes | yes |
+| 1.0 | supportedInterfaces | yes | yes |
+| 1.0 | securityRequirements | no | no |
+| legacy 0.x | url | no | yes |
+| legacy 0.x | preferredTransport | no | yes |
+| legacy 0.x | additionalInterfaces | no | no |
+| legacy 0.x | security | no | no |
+| legacy 0.x | supportsAuthenticatedExtendedCard | no | no |
+| optional | protocolVersion | no | yes |
+| optional | documentationUrl | no | no |
+| optional | iconUrl | no | no |
+| optional | provider | no | no |
+| optional | securitySchemes | no | no |
+| optional | signatures | no | no |
+
+Three conclusions follow directly from that table.
+
+## Required Fields - Where the Clouds Agree
+
+Both cards carry all seven required fields. Neither card is malformed, and a
+validator checking only the required set passes both.
+
+Every difference between these two runtimes is in optional or legacy territory.
+That is why a schema validator is not sufficient for cross cloud work, and why
+the comparison has to happen at the field level.
+
+## The 1.0 and 0.x Split
+
+The Cloud Run card carries `supportedInterfaces` and none of the legacy keys. It
+is a clean 1.0 shape.
+
+The AgentCore card carries `supportedInterfaces` and also `url` and
+`preferredTransport`, which the 1.0 spec replaced. It is a hybrid, serving both
+generations at once.
+
+A client written for 0.x reads `url` and works against AgentCore, and finds
+nothing on Cloud Run. A client written for 1.0 reads `supportedInterfaces` and
+works against both.
+
+| client generation | Cloud Run | AgentCore |
 |---|---|---|
-| gcloud-id-token | the developer holds roles/run.invoker | anything about the coordinator service account |
-| aws-sigv4-local | that identity holds GetAgentCard | anything about the role trust policy |
+| reads url | fails, key absent | works |
+| reads supportedInterfaces | works | works |
+
+The hybrid card is the more compatible of the two. It is also the one that
+declares a version it does not match.
+
+## Where is protocolVersion Declared?
+
+The two SDKs put the protocol version in opposite places:
+
+| location | Cloud Run (ADK) | AgentCore (a2a-sdk) |
+|---|---|---|
+| top level `protocolVersion` | absent | `0.3` |
+| `supportedInterfaces[].protocolVersion` | `1.0` | absent |
+
+A client that reads the top level field sees nothing from Cloud Run and `0.3`
+from AgentCore. A client that reads the per interface field sees `1.0` from
+Cloud Run and nothing from AgentCore.
+
+Both readings are wrong in one direction each. The AgentCore card declares `0.3`
+while carrying the 1.0 `supportedInterfaces` key, so trusting the declared value
+routes a client into the wrong protocol generation.
+
+The reliable test is structural. Branch on the presence of
+`supportedInterfaces`, not on any declared version string.
+
+## Capabilities - Absent is not False
+
+The `capabilities` object differs by one key:
+
+| capability | Cloud Run (ADK) | AgentCore (a2a-sdk) |
+|---|---|---|
+| streaming | false | false |
+| pushNotifications | false | absent |
+| stateTransitionHistory | absent | absent |
+| extensions | absent | absent |
+
+Cloud Run states that push notifications are unsupported. AgentCore says
+nothing.
+
+For a client these are different answers. An explicit `false` is a commitment,
+and an absent key is an unknown that a strict client has to probe or assume. Two
+agents with identical behaviour are described with different degrees of
+confidence.
+
+## Skills - What Counts as a Skill?
+
+Both cards carry exactly one skill with the same four keys, and the values have
+almost nothing in common:
+
+| skill field | Cloud Run (ADK) | AgentCore (a2a-sdk) |
+|---|---|---|
+| id | `research_agent` | `research_brief` |
+| name | `custom` | `research brief` |
+| description | 69 chars, the agent description | 1,258 chars, the system prompt |
+| tags | `custom_agent` | `research`, `writing`, `analysis`, `brain:llm`, `model:us.amazon.nova-micro-v1:0` |
+
+The `id` fields name different things. ADK uses the agent name, so the skill id
+and the agent name are the same string. AgentCore uses the capability name.
+
+The `name` fields are not comparable at all. ADK emits the literal string
+`custom`, which is a category rather than a label. AgentCore emits a human
+readable name.
+
+The `description` fields diverge the most. ADK repeats the agent description.
+AgentCore publishes the agent's entire system prompt, 1,258 characters of
+instruction text, and the tags name the model behind it.
+
+A router selecting agents by skill description is reading a one line summary
+from one cloud and a full system prompt from the other. Ranking those by text
+similarity compares documents of different kinds.
+
+## Which Fields Come from the SDK and Which from the Author?
+
+Not every difference is the runtime's doing. The same a2a-sdk version produces
+different fields in two deployments:
+
+```console
+local    aws skills[0]: description, examples, id, inputModes, name, outputModes, tags
+deployed aws skills[0]: description, id, name, tags
+```
+
+The local specimen sets `examples`, `inputModes` and `outputModes`. The deployed
+agent does not. `documentationUrl` behaves the same way, present locally and
+absent when deployed.
+
+So card richness has two independent sources. Structural fields such as
+`protocolVersion` placement, `url` and `preferredTransport` come from the SDK.
+Descriptive fields such as `examples`, `inputModes` and `documentationUrl` come
+from whoever wrote the agent.
+
+Attributing a missing `examples` array to the cloud is a mistake. Attributing a
+missing `url` key to the author is also a mistake.
+
+## What is Missing from Every Card
+
+Six optional fields are absent from both deployed cards:
+
+| field | what a client loses |
+|---|---|
+| securitySchemes | no declaration of how to authenticate |
+| securityRequirements | no statement of what is required |
+| provider | no organisation behind the agent |
+| documentationUrl | nowhere to send a human |
+| iconUrl | nothing to render in a catalogue |
+| signatures | nothing binds the card to the agent it describes |
+
+The first two matter most. Both agents return 401 or 403 without a credential,
+and neither card declares a security scheme. A client that discovers either
+agent learns nothing from the card about why its next request will be rejected.
+
+The absence of `signatures` means an agent card is an unauthenticated claim. Any
+party able to serve that path can assert any capability.
+
+## What the Field Differences Mean for a Client
+
+Collecting the field analysis into the decisions a client actually makes:
+
+| client decision | field it reads | Cloud Run | AgentCore | safe approach |
+|---|---|---|---|---|
+| which protocol generation | protocolVersion | absent | 0.3, incorrect | test for supportedInterfaces |
+| where to send the request | url or interfaces | 0.0.0.0:8080, unroutable | correct public URL | never route by card URL alone |
+| which transport | preferredTransport | absent | JSONRPC | read protocolBinding on the interface |
+| can it stream | capabilities.streaming | false | false | reliable |
+| can it push | capabilities.pushNotifications | false | absent | treat absent as unknown |
+| what can it do | skills[].description | one line | full system prompt | do not compare by text length |
+| how do I authenticate | securitySchemes | absent | absent | out of band knowledge required |
+| is this card genuine | signatures | absent | absent | not answerable |
+
+Two of these are actively dangerous rather than merely incomplete. Routing by
+the Cloud Run card URL sends traffic to `0.0.0.0:8080`. Trusting the AgentCore
+declared protocol version selects 0.3 semantics for a 1.0 shaped card.
 
 ## Time to Start Comparing some Cards!
 
@@ -307,55 +441,17 @@ stores the run:
 
 ```console
 $ agentcard fetch --save
-run 207a39c27e0c  3/3 card(s)  58ms
+run 2aca64eb85d6  3/3 card(s)  55ms
 
   gcp    200  1.0          675B  none              0 err  0 warn
   aws    200  hybrid       717B  none              0 err  1 warn
   azure  200  hybrid       719B  none              0 err  1 warn
 ```
 
-Three agents produced two card shapes. The agents are identical echo agents, so
-the difference is the SDK.
+The local mesh reproduces the same split. The gcp specimen runs google-adk and
+produces the 1.0 shape. The other two run a2a-sdk and produce the hybrid shape.
 
-## Review the Contrast
-
-The contrast block reports client visible differences:
-
-```console
-contrast: 4 client-visible difference(s)
-  card revision (from its keys):
-    gcp    1.0        aws    hybrid     azure  hybrid
-  protocolVersion as declared:
-    gcp    -          aws    0.3        azure  0.3
-  protocolVersion declared per interface:
-    gcp    1.0        aws    -          azure  -
-  skill ids:
-    gcp    card_specimen   aws  echo    azure  echo
-```
-
-The two version rows reverse exactly. A client that branches on
-`protocolVersion` gets the wrong answer for both stacks, in opposite directions.
-
-Reading the top level makes the ADK card appear undeclared. Reading the
-interfaces makes the a2a-sdk card appear undeclared. The a2a-sdk card also
-declares 0.3 while carrying the 1.0 `supportedInterfaces` key.
-
-The tool reports the declared version and the inferred shape as two separate
-columns for this reason.
-
-Field presence across the mesh shows where a client needs a fallback:
-
-| top-level key | gcp | aws | azure |
-|---|---|---|---|
-| capabilities | yes | yes | yes |
-| description | yes | yes | yes |
-| skills | yes | yes | yes |
-| supportedInterfaces | yes | yes | yes |
-| version | yes | yes | yes |
-| documentationUrl | no | yes | yes |
-| preferredTransport | no | yes | yes |
-| protocolVersion | no | yes | yes |
-| url | no | yes | yes |
+The agents are identical echo agents, so the shape difference is the SDK.
 
 ## Results
 
@@ -363,7 +459,7 @@ Point the tool at a peers file and fetch the deployed agents:
 
 ```console
 $ agentcard --corpus-dir .cards-deployed fetch --peers-file peers.toml --save
-run 07f23fc6df3f  2/3 card(s)  25594ms
+run 99f55f50b545  2/3 card(s)  24974ms
 
   gcp    200  1.0          528B  gcloud-id-token   1 err  2 warn
   aws    200  hybrid      2109B  aws-sigv4-local   0 err  2 warn
@@ -374,7 +470,7 @@ Two of three answered. The Azure leg stays in the corpus as a row rather than a
 gap, because a blank column reads as disagreement with every other peer, which
 is the opposite of what a denial means.
 
-The deployed run produced six findings:
+The run produced six findings:
 
 | sev | peer | code | detail |
 |---|---|---|---|
@@ -384,45 +480,6 @@ The deployed run produced six findings:
 | warning | gcp | undeclared-auth | fetched with a credential, names no securitySchemes |
 | warning | aws | undeclared-auth | same, on the other cloud |
 | warning | aws | version-shape-mismatch | declares 0.3, shaped like hybrid |
-
-## Cross Checking the Deployed Cards
-
-Both card shapes from the local mesh reproduce on the deployed pair. The shapes
-are a property of the SDK, not of the specimen code:
-
-| peer | runtime | shape | protocolVersion top level | per interface |
-|---|---|---|---|---|
-| gcp | Cloud Run / ADK to_a2a | 1.0 | absent | 1.0 |
-| aws | Bedrock AgentCore / a2a-sdk | hybrid | 0.3 | absent |
-
-The largest contrast in the run is what each runtime considers a skill. The same
-logical agent writes a short sourced research brief.
-
-google-adk publishes the agent description as one skill, 69 characters long:
-
-```json
-"skills": [{ "id": "research_agent", "name": "custom",
-             "tags": ["custom_agent"] }]
-```
-
-a2a-sdk on AgentCore publishes the entire system prompt as the skill
-description, 1,258 characters, and names the model in the tags:
-
-```json
-"skills": [{ "id": "research_brief", "name": "research brief",
-             "description": "You are a research assistant with a web_search
-                             tool. Given a topic, you write one short research
-                             brief and nothing else...",
-             "tags": ["research","writing","analysis","brain:llm",
-                      "model:us.amazon.nova-micro-v1:0"] }]
-```
-
-The card is served to any caller that can reach discovery. On this runtime it
-carries the prompt and the model id.
-
-Neither card declares a `securitySchemes` block, and both require a credential.
-A client that discovers either agent learns nothing from the card about why its
-next request will be rejected.
 
 ## A Card that Changed
 
@@ -437,11 +494,9 @@ across three and a half hours:
 | 07f23fc6df3f | 17:17:39 | 0.0.1 | 1 | 528 |
 | 6dedd20d0b05 | 17:40:46 | 0.0.1 | 1 | 528 |
 
-This is a step change, not a transient. Three runs sit on one side and two on
-the other, and each group is byte for byte stable.
-
-The card lost two thirds of its bytes and three of its four skills. The
-`version` field did not move.
+Three runs sit on one side and two on the other, and each group is byte for byte
+stable. The card lost two thirds of its bytes and three of its four skills, and
+the `version` field did not move.
 
 The flattened composition is what was removed:
 
@@ -465,12 +520,8 @@ $ diff <(agentcard replay 05bb15448c63) <(agentcard replay 07f23fc6df3f)
 ```
 
 Both runs report 1 error and 2 warnings on this peer, and the same six defects
-run wide at the same severities. The error is the pre-existing
-bind-address-on-card, which is true of both cards.
-
-A checker that asks only whether a card is conformant reports no difference,
-because on that question there is none. The card with one skill is exactly as
-conformant as the card with four.
+run wide at the same severities. A checker that asks only whether a card is
+conformant reports no difference, because on that question there is none.
 
 ## Gating on Drift
 
@@ -482,9 +533,8 @@ $ agentcard fetch --save --fail-on-change
 $ agentcard fetch --fail-on-defect
 ```
 
-Neither gate substitutes for the other. Restarting a specimen so it advertises a
-different URL produces exit 0 from `--fail-on-defect` and exit 4 from
-`--fail-on-change`.
+Restarting a specimen so it advertises a different URL produces exit 0 from
+`--fail-on-defect` and exit 4 from `--fail-on-change`.
 
 | exit | meaning |
 |---|---|
@@ -517,11 +567,8 @@ port:
 | aws (deployed) | aws-sigv4-local | no | 1 | 695 |
 | azure (deployed) | none | yes | 1 | 25550 |
 
-The local mesh answers in 56 ms. The deployed run takes 25.6 seconds, and 25.5
-of those are the Azure Container App cold starting to return a 401.
-
-Card sizes vary by 4x across runtimes serving the same agent: 528 bytes from ADK
-on Cloud Run and 2,109 bytes from AgentCore.
+The local mesh answers in 55 ms. The deployed run takes 25 seconds, and almost
+all of it is the Azure Container App cold starting to return a 401.
 
 ## Validating the Results
 
@@ -534,12 +581,13 @@ Each result was re-checked with curl and python3, independent of the tool:
 | Both shapes reproduce when deployed | parsed the server raw bytes | confirmed |
 | Live card advertises 0.0.0.0:8080 | curl the deployed card | confirmed |
 | Neither deployed card declares auth | curl and raw bytes | confirmed |
-| The runtimes disagree on skill | raw bytes, field by field | confirmed |
+| capabilities differ by one key | field inventory across both cards | confirmed |
+| skill fields carry different meanings | field inventory across both cards | confirmed |
+| skill richness is author set | same SDK, two deployments | confirmed |
 | A card changed with no version bump | five stored runs over 3.5 h | confirmed |
 | The review did not report the change | diff of both review outputs | identical |
 | The two gates catch different things | both run on one changed card | 0 vs 4 |
 | replay never dials | every server killed, then replayed | confirmed |
-| A peer name is not an identity | local run diffed against deployed run | not gated |
 
 The replay path is tested by removing the network. Stop every server, confirm
 nothing is listening, then replay a run that fetched three cards:
@@ -556,49 +604,47 @@ run 1657b2be9bff  3/3 card(s)  46ms
 
 Three cards are reviewed with every server down.
 
-Two conditions apply when reproducing this. Assert that every peer returned a
-card before reading a gate, since a specimen that is not yet serving records a
-real no-card error. And replay operates only on stored runs, so the preceding
-fetch must use `--save`.
-
 ## Final Results
 
-| approach | catches invalid cards | catches vendor drift | needs the agent running | cost |
+| approach | catches invalid cards | catches field divergence | catches drift | cost |
 |---|---|---|---|---|
 | read the spec | no | no | no | free |
 | a JSON schema validator | yes | no | no | free |
-| invoke the agent and inspect | partly | no | yes | model spend |
-| this harness | yes | yes | yes, discovery only | zero spend |
+| invoke the agent and inspect | partly | no | no | model spend |
+| this harness | yes | yes | yes | zero spend |
 
-The drift column separates them. Every other approach reports no change on the
-card that lost three skills.
-
-The A2A protocol is consistent enough that all five cards parse. The runtimes
-built on top of it are not consistent about what a card contains, where the
-protocol version is declared, or what counts as a skill.
+Both deployed cards are valid. Every meaningful difference between them sits in
+optional and legacy fields that a schema validator does not examine, which is
+the gap a field level comparison fills.
 
 ## Summary
 
-The goal of this article was to fetch and compare A2A agent cards across
-multiple clouds and identify where the runtimes disagree. The key to the
-solution was storing the exact bytes each server returned and deriving every
-later step from them. Three local specimens and three remote agents were
-presented, covering two A2A SDKs and three deployment clouds. Finally, a drift
-gate was added to compare each run against the previous stored corpus.
+The goal of this article was to fetch A2A agent cards from multiple clouds and
+compare the fields they publish. The key to the solution was storing the exact
+bytes each server returned and comparing every field at every nesting level.
+Three local specimens and three remote agents were presented, covering two A2A
+SDKs and three deployment clouds. Finally, a drift gate was added to compare
+each run against the previous stored corpus.
 
-The results were:
+The field comparison produced these results:
 
-- Two SDKs produce two card shapes, and both reproduce on real deployments.
-- The two SDKs declare protocolVersion in opposite places, so a client branching
-  on that field is wrong for both stacks.
-- Two of three clouds are reachable from a workstation, and the report names the
-  credential mode on every row.
-- The runtimes disagree about what a skill is. ADK flattens its composition tree
-  onto the card, and AgentCore publishes the system prompt and the model id.
+- Both deployed cards carry all seven required fields, so both are valid and
+  every difference sits in optional or legacy territory.
+- The AgentCore card is a hybrid, carrying the 1.0 `supportedInterfaces` and the
+  0.x `url` and `preferredTransport` together. The Cloud Run card is clean 1.0.
+- The two SDKs declare `protocolVersion` in opposite places, and the AgentCore
+  value of 0.3 contradicts the 1.0 shape of the card it appears on.
+- `capabilities` differ by one key, and an absent key is not the same answer as
+  an explicit false.
+- The `skills` fields carry different meanings on each cloud. ADK emits the
+  literal name `custom` and a one line description, and AgentCore emits a human
+  name, a 1,258 character system prompt and the model id.
+- Card richness has two sources. Structural fields come from the SDK, and
+  descriptive fields come from the agent author.
+- Six optional fields are absent from both cards, including `securitySchemes` on
+  two agents that both require credentials, and `signatures` on both.
 - A live card changed with no version bump, and the conformance review was
   identical on both sides of the change.
-- Azure remains closed, because its Entra app has not consented to the CLI
-  client id.
 
 Cards change without notice and without a version bump, so every result in this
 article names the date it was measured on.

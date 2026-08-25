@@ -241,3 +241,51 @@ def test_an_unknown_run_is_one_line_not_a_traceback(tmp_path, capsys):
         main(["--corpus-dir", str(tmp_path), "replay", "nope"])
     assert caught.value.code == 1
     assert "no stored run matches" in capsys.readouterr().err
+
+
+# Drift gating. A defect is a card that is wrong now; drift is a card that is
+# different from the one this project last read. `CLAUDE.md` names the second
+# as the event the repo exists to catch -- a runtime moving 0.3 -> 1.0 between
+# deploys with every check still green -- so it needs its own exit code.
+
+
+def test_diff_can_be_made_to_fail_on_a_change(tmp_path, hybrid_card, capsys):
+    store.save(_corpus(("aws", hybrid_card), run_id="aaa111"), tmp_path)
+    store.save(_corpus(("aws", dict(hybrid_card, version="9.9.9")), run_id="bbb222"), tmp_path)
+    assert main(["--corpus-dir", str(tmp_path), "diff", "--fail-on-change"]) == 4
+    assert "version changed" in capsys.readouterr().out
+
+
+def test_diff_without_the_gate_still_exits_zero(tmp_path, hybrid_card):
+    store.save(_corpus(("aws", hybrid_card), run_id="aaa111"), tmp_path)
+    store.save(_corpus(("aws", dict(hybrid_card, version="9.9.9")), run_id="bbb222"), tmp_path)
+    assert main(["--corpus-dir", str(tmp_path), "diff"]) == 0
+
+
+def test_an_unchanged_pair_does_not_trip_the_gate(tmp_path, hybrid_card):
+    store.save(_corpus(("aws", hybrid_card), run_id="aaa111"), tmp_path)
+    store.save(_corpus(("aws", hybrid_card), run_id="bbb222"), tmp_path)
+    assert main(["--corpus-dir", str(tmp_path), "diff", "--fail-on-change"]) == 0
+
+
+def test_drift_is_reported_against_the_run_before_this_one(tmp_path, hybrid_card, capsys):
+    """The ordering trap. `--save` writes this run into the same directory, so a
+    baseline read *after* the save is the run we just made -- which diffs clean
+    against itself and reports that drift never happens."""
+    from cards.cli import _report_drift
+
+    previous = _corpus(("aws", hybrid_card), run_id="aaa111")
+    store.save(previous, tmp_path)
+    current = _corpus(("aws", dict(hybrid_card, version="9.9.9")), run_id="bbb222")
+
+    assert _report_drift(previous, current) is True
+    assert "drift since aaa111" in capsys.readouterr().out
+    # Against itself, nothing moved.
+    assert _report_drift(current, current) is False
+
+
+def test_the_first_run_ever_has_nothing_to_drift_from(capsys, hybrid_card):
+    from cards.cli import _report_drift
+
+    assert _report_drift(None, _corpus(("aws", hybrid_card))) is False
+    assert capsys.readouterr().out == ""

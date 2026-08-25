@@ -44,6 +44,14 @@ from peers.registry import (
 NO_CARDS_EXIT = 3
 DEFECTS_EXIT = 2
 
+#: Exit 4 when a card changed since the run before. Separate from 2 because a
+#: defect and a change are opposite kinds of news: a defect is a card that is
+#: wrong *now*, drift is a card that is different from the one this project
+#: last read -- and a vendor moving 0.3 -> 1.0 between two deploys, with every
+#: check still green, is the event `CLAUDE.md` says this repo exists to catch.
+#: Gating on defects alone would let exactly that through.
+DRIFT_EXIT = 4
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -93,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=f"exit {DEFECTS_EXIT} if any card has an error-severity finding",
     )
+    fetch.add_argument(
+        "--fail-on-change",
+        action="store_true",
+        help=f"exit {DRIFT_EXIT} if any card differs from the previous stored run",
+    )
 
     replay = sub.add_parser("replay", help="re-review a stored run, no network")
     replay.add_argument("run", nargs="?", help="path to a stored run; default the latest")
@@ -111,6 +124,11 @@ def build_parser() -> argparse.ArgumentParser:
     diff = sub.add_parser("diff", help="what changed between two stored runs")
     diff.add_argument("old", nargs="?", help="default: the run before the latest")
     diff.add_argument("new", nargs="?", help="default: the latest")
+    diff.add_argument(
+        "--fail-on-change",
+        action="store_true",
+        help=f"exit {DRIFT_EXIT} if any card changed",
+    )
 
     sub.add_parser("history", help="list stored runs")
     return parser
@@ -162,6 +180,27 @@ def _latest_or_exit(directory: Path) -> Corpus:
         )
         raise SystemExit(1)
     return corpus
+
+
+def _report_drift(previous: Corpus | None, current: Corpus) -> bool:
+    """Print what changed since the previous run. True if anything did.
+
+    Printed unconditionally, gated only on request. A run whose cards moved is
+    worth saying so about even when nobody asked the process to fail -- the
+    whole reason the corpus is dated is that "did this card change" is the
+    question, and answering it only under a flag means the usual run never asks.
+    """
+    if previous is None:
+        return False
+    changes = store.diff_specimens(previous, current)
+    if not changes:
+        return False
+    print(f"\ndrift since {previous.run_id}:")
+    for peer, entries in changes.items():
+        print(f"  {peer}:")
+        for entry in entries:
+            print(f"    {entry}")
+    return True
 
 
 def _load_or_exit(ref: str, directory: Path) -> Corpus:
@@ -220,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {peer}:")
             for entry in entries:
                 print(f"    {entry}")
-        return 0
+        return DRIFT_EXIT if args.fail_on_change else 0
 
     if args.command == "replay":
         corpus = _load_or_exit(args.run, directory) if args.run else _latest_or_exit(directory)
@@ -244,6 +283,11 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
     paths = tuple(args.path) if args.path else CARD_PATHS
+    # Read before the fetch is stored, not after: `--save` writes this run into
+    # the same directory, and a `latest` taken afterwards is the run we just
+    # made -- which diffs clean against itself and reports drift never happens.
+    previous = store.latest(directory)
+
     corpus = asyncio.run(
         fetch_all(peers, timeout_seconds=args.timeout, paths=paths)
     )
@@ -253,11 +297,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"stored {path}", file=sys.stderr)
 
     errors, _ = _render(corpus, args)
+    drifted = _report_drift(previous, corpus)
 
     if not corpus.fetched:
         return NO_CARDS_EXIT
     if args.fail_on_defect and errors:
         return DEFECTS_EXIT
+    if args.fail_on_change and drifted:
+        return DRIFT_EXIT
     return 0
 
 

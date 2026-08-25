@@ -99,6 +99,38 @@ agentcard fetch --save             # dial them, review, contrast, store
 
 `python3 -m cards.cli` is the same program and always works, installed or not.
 
+Run it as a gate, which is the point of storing anything:
+
+```bash
+agentcard fetch --save --fail-on-change     # exit 4 if any card moved
+agentcard fetch --fail-on-defect            # exit 2 if any card is wrong
+agentcard diff --fail-on-change             # exit 4, over the stored corpus
+```
+
+The two gates catch opposite things and neither substitutes for the other. A
+**defect** is a card that is wrong now. **Drift** is a card that differs from
+the one this project last read — and a runtime moving `0.3` to `1.0` between
+two deploys, with every check still green, is the event `CLAUDE.md` says this
+repo exists to catch. Measured: change a specimen's advertised URL and
+`--fail-on-defect` exits `0` while `--fail-on-change` exits `4` and names the
+fields.
+
+Drift is measured against the **last saved run**, so `--save` accepts the
+current cards as the new baseline. Without it the same drift is re-reported
+every run until something stores it.
+
+| exit | meaning |
+|---|---|
+| 0 | ran, nothing gated |
+| 1 | bad invocation — a peer list that will not assemble, a run id that names nothing |
+| 2 | `--fail-on-defect`: a card has an error-severity finding |
+| 3 | **no peer served a card at all** |
+| 4 | `--fail-on-change`: a card differs from the previous stored run |
+
+`3` is separate from `1` and `2` on purpose. A harness has to be able to tell
+*the instrument failed* from *the instrument worked and the news is bad*, and
+"every peer refused" is the first of those however green the checks are.
+
 ```
 run 8859a97fa522  3/3 card(s)  53ms
 
@@ -273,7 +305,7 @@ explicit mode so a peers file can configure this per peer.
 ## Testing
 
 ```bash
-python3 -m pytest -q      # 110 passed
+python3 -m pytest -q      # 115 passed
 ruff check .              # all checks passed
 ```
 

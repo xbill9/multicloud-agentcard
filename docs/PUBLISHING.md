@@ -149,15 +149,27 @@ curl -X POST https://dev.to/api/articles \
   --data-binary @article.json
 ```
 
-**Use curl, not a bare Python client.** Measured 2026-08-26: the identical
-payload returned a bodyless `403` from `urllib` and `201` from `curl`. It is not
-permissions, payload shape or content -- it is the User-Agent, and
-`Python-urllib/3.13` is refused. Four attempts were spent bisecting fields and
-body size before the client turned out to be the variable. Set a real
-User-Agent or shell out to curl.
+**Send a real User-Agent.** Measured 2026-08-26: the identical payload returned
+a bodyless `403` from `urllib` and `201` from `curl`. It is not permissions,
+payload shape or content -- `Python-urllib/3.13` is refused by User-Agent.
+Setting a browser User-Agent on the same `urllib` request makes it work, which
+is what `post_devto.py` does. The `403` carries no body and no `cf-*` headers,
+so nothing in the response says what was rejected.
 
-The `403` carries no body and no `cf-*` headers, so nothing in the response
-says what was rejected.
+**Unwrap prose before posting.** Forem parses markdown with hard wrap enabled,
+so a single newline becomes a `<br>`. Prose hard wrapped at 80 columns arrives
+with a line break after every source line, and the article reads ragged down the
+page. The markdown here stays wrapped because that is what makes diffs
+readable, so `post_devto.py` joins each paragraph into one line on the way out
+and leaves fences, tables, headings and list items alone:
+
+```bash
+python3 docs/post_devto.py devto-aws-draft.md --id 4489111
+```
+
+Measured after the fix: zero paragraphs with a mid-paragraph break in either
+article. The breaks that remain are one per paragraph immediately preceding a
+code fence, which Forem adds itself and which renders as slightly more space.
 
 ## Image URLs
 

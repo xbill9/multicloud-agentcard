@@ -36,17 +36,24 @@ inherits that difference.
 The spec places the card at `/.well-known/agent-card.json`, with
 `/.well-known/agent.json` as the older path.
 
-#### Why is Discovery Privileged Separately from Invocation?
+#### How is Discovery Privileged Against Invocation?
 
-Discovery is a separate permission from invocation on all three clouds. On AWS
-it is a different IAM action entirely: `bedrock-agentcore:GetAgentCard`, not
-`bedrock-agentcore:InvokeAgentRuntime`.
+Differently on each cloud, and the three answers do not resemble each other:
 
-A credential can reach the call and still fail on the card. The failure surfaces
-as a transport or protocol error, nowhere near auth.
+![Table: cloud; what gates the card; separable from invocation](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-01.png)
+
+Only AgentCore lets you grant discovery without granting invocation. On Cloud
+Run the card and the call sit behind one role, so anything that can read the
+card can also run the agent. On Container Apps the platform intercepts every
+path ahead of the container, which is stricter still and is covered later.
+
+The AgentCore case is the one that produces a confusing failure. A policy
+granting only `InvokeAgentRuntime` denies the card fetch, and the denial
+surfaces as a transport or protocol error nowhere near auth.
 
 This is why the credential is attached to the httpx client rather than to a
-single request.
+single request: the card fetch needs authenticating in its own right, not as a
+side effect of the call it is preparing for.
 
 #### Tool Chain Setup
 
@@ -189,7 +196,7 @@ proves IAM role membership only, so the tool logs a warning on every fallback.
 This is the full top level field inventory across the three clouds. The spec
 groups fields into required core, 1.0 era, legacy 0.x, and optional:
 
-![Table: category; field; Cloud Run ADK; AgentCore a2a-sdk; Container Apps Agent Framework](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-01.png)
+![Table: category; field; Cloud Run ADK; AgentCore a2a-sdk; Container Apps Agent Framework](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-02.png)
 
 Read the last two columns again. AgentCore and Container Apps agree on every
 single row.
@@ -202,11 +209,18 @@ differences anywhere in the two cards are the hostnames and one tag value:
 
 Those are two different clouds running two different agent frameworks. Strands
 on AgentCore, Microsoft Agent Framework on Container Apps. They emit
-structurally identical cards because both serve through the same a2a-sdk route
-helper.
+structurally identical cards because both hand card construction to the same
+a2a-sdk route helper.
 
 Cloud Run is the only column that differs, and it differs on every structural
-row.
+row. ADK does not delegate; `to_a2a()` builds its own card.
+
+That is the honest width of this result. What varies with the cloud is nothing;
+what varies is whether the framework builds the card itself or delegates. Two
+delegating frameworks agreeing does not prove the framework is irrelevant, since
+neither is doing the work. Separating the two properly would need one framework
+across two SDKs, or a non-delegating framework on two clouds, and neither is in
+this mesh.
 
 #### Required Fields - Where the Clouds Agree
 
@@ -230,7 +244,7 @@ A client written for 0.x reads `url`, works against two of the three clouds, and
 finds nothing on Cloud Run. A client written for 1.0 reads `supportedInterfaces`
 and works everywhere.
 
-![Table: client generation; Cloud Run; AgentCore; Container Apps](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-02.png)
+![Table: client generation; Cloud Run; AgentCore; Container Apps](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-03.png)
 
 The hybrid cards are the more compatible of the two shapes. They are also the
 ones declaring a version they do not match.
@@ -239,7 +253,7 @@ ones declaring a version they do not match.
 
 The two SDKs put the protocol version in opposite places:
 
-![Table: location; Cloud Run ADK; AgentCore; Container Apps](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-03.png)
+![Table: location; Cloud Run ADK; AgentCore; Container Apps](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-04.png)
 
 A client that reads the top level field sees nothing from Cloud Run and `0.3`
 from the other two. A client that reads the per interface field sees `1.0` from
@@ -256,7 +270,7 @@ The reliable test is structural. Branch on the presence of
 
 The `capabilities` object differs by one key:
 
-![Table: capability; Cloud Run ADK; AgentCore; Container Apps](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-04.png)
+![Table: capability; Cloud Run ADK; AgentCore; Container Apps](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-05.png)
 
 Cloud Run states that push notifications are unsupported. The other two say
 nothing.
@@ -271,7 +285,7 @@ confidence.
 All three cards carry exactly one skill with the same four keys. Two of the
 three agree on every value; the third has almost nothing in common with them:
 
-![Table: skill field; Cloud Run ADK; AgentCore; Container Apps](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-05.png)
+![Table: skill field; Cloud Run ADK; AgentCore; Container Apps](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-06.png)
 
 The `id` fields name different things. ADK uses the agent name, so the skill id
 and the agent name are the same string. The other two use the capability name.
@@ -311,7 +325,7 @@ missing `url` key to the author is also a mistake.
 
 Six optional fields are absent from both deployed cards:
 
-![Table: field; what a client loses](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-06.png)
+![Table: field; what a client loses](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-07.png)
 
 The first two matter most. All three agents reject unauthenticated requests, and
 not one card declares a security scheme. A client that discovers any of these
@@ -325,7 +339,7 @@ party able to serve that path can assert any capability.
 
 Collecting the field analysis into the decisions a client actually makes:
 
-![Table: client decision; field it reads; Cloud Run; AgentCore; Container Apps; safe approach](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-07.png)
+![Table: client decision; field it reads; Cloud Run; AgentCore; Container Apps; safe approach](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-08.png)
 
 Two of these are actively dangerous rather than merely incomplete. Routing by
 the Cloud Run card URL sends traffic to `0.0.0.0:8080`. Trusting the declared
@@ -356,7 +370,7 @@ Point the tool at a peers file and fetch the deployed agents:
 
 Three clouds, three cards. The run produced seven findings:
 
-![Table: sev; peer; code; detail](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-08.png)
+![Table: sev; peer; code; detail](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-09.png)
 
 The only error belongs to one cloud. The two hybrid cards produce identical
 findings as well as identical fields.
@@ -366,18 +380,41 @@ findings as well as identical fields.
 Five runs of the same peer, at the same endpoint, with the same credential,
 across three and a half hours:
 
-![Table: run; time UTC; version; skills; bytes](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-09.png)
+![Table: run; time UTC; version; skills; bytes](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-10.png)
 
 Three runs sit on one side and two on the other, and each group is byte for byte
 stable. The card lost two thirds of its bytes and three of its four skills, and
 the `version` field did not move.
 
+The cause is a deployment, and the platform will tell you so:
+
+![Code: $ gcloud run revisions list --service=research-gcp --region=us-c](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-19.png)
+
+Revision 00020 was created at 17:08:19, between the last four skill reading at
+16:01 and the first one skill reading at 17:17. The revision before it was
+eleven days old. The agent was redeployed with different composition, which is
+ordinary and expected.
+
+So this is not a card mutating on its own, and it would be wrong to read it that
+way. What it does show is narrower and still worth having: **a redeploy changed
+the card materially while `version` stayed at `0.0.1`.** A client cannot use
+`version` to decide whether a card it cached is still current, because the field
+does not track the content. That is an agent authoring gap rather than a
+platform or protocol one, and it is invisible from the card alone.
+
+Checking the revision list is one command, and it is the difference between
+reporting a fact and reporting a mechanism. Any drift a corpus catches should be
+matched against the platform's own deployment history before it is called
+anything stronger than a change.
+
 The flattened composition is what was removed:
 
-![Code: 05bb15448c63 -> 'research_agent',](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-19.png)
+![Code: 05bb15448c63 -> 'research_agent',](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-20.png)
 
 A client that discovered this agent at 16:01 and cached "it can search the web"
-held a claim the card no longer made by 17:17.
+held a claim the card no longer made by 17:17, and nothing in the card told it
+so. The redeploy is the explanation; it is not the excuse, because a client has
+no way to see a redeploy.
 
 The review output is identical across the change. Diffing the two defect blocks
 produces no output:
@@ -395,12 +432,12 @@ conformant reports no difference, because on that question there is none.
 Conformance and change are different questions, so they use different exit
 codes:
 
-![Code: $ agentcard fetch --save --fail-on-change](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-20.png)
+![Code: $ agentcard fetch --save --fail-on-change](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-21.png)
 
 Restarting a specimen so it advertises a different URL produces exit 0 from
 `--fail-on-defect` and exit 4 from `--fail-on-change`.
 
-![Table: exit; meaning](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-10.png)
+![Table: exit; meaning](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-11.png)
 
 Exit 3 is distinct from 1 and 2. A harness must separate an instrument failure
 from a working instrument reporting bad news.
@@ -416,7 +453,7 @@ A card fetched over a federated credential costs round trips to another cloud
 identity provider first, and arrives byte identical to one fetched from an open
 port:
 
-![Table: peer; auth; keyless; round trips; discovery ms](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-11.png)
+![Table: peer; auth; keyless; round trips; discovery ms](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-12.png)
 
 The local mesh answers in 55 ms. The deployed run is dominated by whichever
 container is cold, and the Azure leg costs two round trips rather than one
@@ -427,18 +464,18 @@ requested.
 
 Each result was re-checked with curl and python3, independent of the tool:
 
-![Table: result; validation method; outcome](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-12.png)
+![Table: result; validation method; outcome](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-13.png)
 
 The replay path is tested by removing the network. Stop every server, confirm
 nothing is listening, then replay a run that fetched three cards:
 
-![Code: $ ss -ltn | grep -c '1100123'](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-21.png)
+![Code: $ ss -ltn | grep -c '1100123'](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/code-22.png)
 
 Three cards are reviewed with every server down.
 
 #### Final Results
 
-![Table: approach; catches invalid cards; catches field divergence; catches drift; cost](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-13.png)
+![Table: approach; catches invalid cards; catches field divergence; catches drift; cost](https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/img/medium/table-14.png)
 
 All three deployed cards are valid. Every meaningful difference sits in optional
 and legacy fields that a schema validator does not examine, which is the gap a
@@ -446,8 +483,9 @@ field level comparison fills.
 
 The three way result is sharper than a two way one. Two clouds and two agent
 frameworks produced structurally identical cards, and the third differed on
-every structural row. The card shape follows the serving SDK, not the cloud and
-not the agent framework.
+every structural row. Across this mesh the card shape tracks the card builder,
+not the cloud: the two frameworks that delegate to a2a-sdk agree exactly, and
+the one that builds its own card is the outlier on every structural row.
 
 #### Summary
 
@@ -467,8 +505,10 @@ The field comparison produced these results:
   clouds and two agent frameworks, one shape.
 - Cloud Run is the outlier on every structural row, and it is the only card
   carrying an error.
-- The card shape follows the serving SDK, not the cloud and not the agent
-  framework.
+- Across this mesh the shape tracks the card builder rather than the cloud. Both
+  identical cards come from frameworks that delegate to a2a-sdk; the outlier
+  builds its own. Whether the framework matters independently of that is not
+  separable here, because no framework appears on two SDKs.
 - The two SDKs declare `protocolVersion` in opposite places, and the `0.3` on
   the two hybrid cards contradicts the 1.0 shape they carry.
 - `capabilities` differ by one key, and an absent key is not the same answer as
@@ -477,8 +517,11 @@ The field comparison produced these results:
   other two emit a human name, the agent's full system prompt and the model id.
 - Not one card declares `securitySchemes`, though all three reject
   unauthenticated requests.
-- A live card changed with no version bump, and the conformance review was
-  identical on both sides of the change.
+- A redeploy changed a card from four skills to one while `version` stayed at
+  `0.0.1`, and the conformance review was identical on both sides. The cause was
+  a Cloud Run revision created between the two readings, not a card mutating on
+  its own; the point is that `version` does not track content, so a client
+  cannot use it to tell whether a cached card is current.
 
 Discovery is privileged differently on each cloud, and the range is wide. Cloud
 Run gates the card behind an invoker role. AgentCore makes discovery a
@@ -487,8 +530,23 @@ platform, so the card is readable only by the single federated identity the app
 registration trusts, and a client must already hold the credential before it can
 read the document describing which credential to use.
 
-Cards change without notice and without a version bump, so every result in this
-article names the date it was measured on.
+#### What this does not establish
+
+One agent per runtime, one region per cloud, one tenant, and a single reading of
+each card apart from the Cloud Run series. Two SDKs and three frameworks, with
+no framework appearing on more than one SDK.
+
+So the field differences are properties of these deployments on this date. They
+are not a survey of what Cloud Run, AgentCore or Container Apps do in general,
+and the two identical cards agree because of a shared card builder rather than
+anything the clouds have in common.
+
+The field categories used throughout come from this repo's model of the spec in
+`cards/spec.py`, not from an independent conformance suite. A field sorted into
+the wrong category there would move consistently across every table here.
+
+Cards change across deploys without the `version` field moving, so every result
+in this article names the date it was measured on.
 
 The code is at
 [xbill9/multicloud-agentcard](https://github.com/xbill9/multicloud-agentcard).

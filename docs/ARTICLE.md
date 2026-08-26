@@ -36,17 +36,28 @@ inherits that difference.
 The spec places the card at `/.well-known/agent-card.json`, with
 `/.well-known/agent.json` as the older path.
 
-## Why is Discovery Privileged Separately from Invocation?
+## How is Discovery Privileged Against Invocation?
 
-Discovery is a separate permission from invocation on all three clouds. On AWS
-it is a different IAM action entirely: `bedrock-agentcore:GetAgentCard`, not
-`bedrock-agentcore:InvokeAgentRuntime`.
+Differently on each cloud, and the three answers do not resemble each other:
 
-A credential can reach the call and still fail on the card. The failure surfaces
-as a transport or protocol error, nowhere near auth.
+| cloud | what gates the card | separable from invocation |
+|---|---|---|
+| Bedrock AgentCore | `bedrock-agentcore:GetAgentCard` | yes, a distinct IAM action |
+| Cloud Run | `roles/run.invoker` | no, the same role invokes |
+| Container Apps | platform auth on every path | no, and not configurable per path here |
+
+Only AgentCore lets you grant discovery without granting invocation. On Cloud
+Run the card and the call sit behind one role, so anything that can read the
+card can also run the agent. On Container Apps the platform intercepts every
+path ahead of the container, which is stricter still and is covered later.
+
+The AgentCore case is the one that produces a confusing failure. A policy
+granting only `InvokeAgentRuntime` denies the card fetch, and the denial
+surfaces as a transport or protocol error nowhere near auth.
 
 This is why the credential is attached to the httpx client rather than to a
-single request.
+single request: the card fetch needs authenticating in its own right, not as a
+side effect of the call it is preparing for.
 
 ## Tool Chain Setup
 
@@ -338,11 +349,18 @@ differences anywhere in the two cards are the hostnames and one tag value:
 
 Those are two different clouds running two different agent frameworks. Strands
 on AgentCore, Microsoft Agent Framework on Container Apps. They emit
-structurally identical cards because both serve through the same a2a-sdk route
-helper.
+structurally identical cards because both hand card construction to the same
+a2a-sdk route helper.
 
 Cloud Run is the only column that differs, and it differs on every structural
-row.
+row. ADK does not delegate; `to_a2a()` builds its own card.
+
+That is the honest width of this result. What varies with the cloud is nothing;
+what varies is whether the framework builds the card itself or delegates. Two
+delegating frameworks agreeing does not prove the framework is irrelevant, since
+neither is doing the work. Separating the two properly would need one framework
+across two SDKs, or a non-delegating framework on two clouds, and neither is in
+this mesh.
 
 ## Required Fields - Where the Clouds Agree
 
@@ -571,6 +589,32 @@ Three runs sit on one side and two on the other, and each group is byte for byte
 stable. The card lost two thirds of its bytes and three of its four skills, and
 the `version` field did not move.
 
+The cause is a deployment, and the platform will tell you so:
+
+```console
+$ gcloud run revisions list --service=research-gcp --region=us-central1
+NAME                    CREATION_TIMESTAMP
+research-gcp-00020-6hd  2026-08-25T17:08:19Z
+research-gcp-00019-dq6  2026-08-14T19:20:15Z
+```
+
+Revision 00020 was created at 17:08:19, between the last four skill reading at
+16:01 and the first one skill reading at 17:17. The revision before it was
+eleven days old. The agent was redeployed with different composition, which is
+ordinary and expected.
+
+So this is not a card mutating on its own, and it would be wrong to read it that
+way. What it does show is narrower and still worth having: **a redeploy changed
+the card materially while `version` stayed at `0.0.1`.** A client cannot use
+`version` to decide whether a card it cached is still current, because the field
+does not track the content. That is an agent authoring gap rather than a
+platform or protocol one, and it is invisible from the card alone.
+
+Checking the revision list is one command, and it is the difference between
+reporting a fact and reporting a mechanism. Any drift a corpus catches should be
+matched against the platform's own deployment history before it is called
+anything stronger than a change.
+
 The flattened composition is what was removed:
 
 ```
@@ -583,7 +627,9 @@ The flattened composition is what was removed:
 ```
 
 A client that discovered this agent at 16:01 and cached "it can search the web"
-held a claim the card no longer made by 17:17.
+held a claim the card no longer made by 17:17, and nothing in the card told it
+so. The redeploy is the explanation; it is not the excuse, because a client has
+no way to see a redeploy.
 
 The review output is identical across the change. Diffing the two defect blocks
 produces no output:
@@ -653,9 +699,9 @@ Each result was re-checked with curl and python3, independent of the tool:
 |---|---|---|
 | Two SDKs, two card shapes | curl both local cards | confirmed |
 | protocolVersion in opposite places | curl, read the field | confirmed |
-| Both shapes reproduce when deployed | parsed the server raw bytes | confirmed |
+| Both local shapes reproduce when deployed | parsed the server raw bytes | confirmed |
 | Live card advertises 0.0.0.0:8080 | curl the deployed card | confirmed |
-| Neither deployed card declares auth | curl and raw bytes | confirmed |
+| No deployed card declares auth | curl and raw bytes | confirmed |
 | capabilities differ by one key | field inventory across all three cards | confirmed |
 | skill fields carry different meanings | field inventory across all three cards | confirmed |
 | skill richness is author set | same SDK, two deployments | confirmed |
@@ -697,8 +743,9 @@ field level comparison fills.
 
 The three way result is sharper than a two way one. Two clouds and two agent
 frameworks produced structurally identical cards, and the third differed on
-every structural row. The card shape follows the serving SDK, not the cloud and
-not the agent framework.
+every structural row. Across this mesh the card shape tracks the card builder,
+not the cloud: the two frameworks that delegate to a2a-sdk agree exactly, and
+the one that builds its own card is the outlier on every structural row.
 
 ## Summary
 
@@ -718,8 +765,10 @@ The field comparison produced these results:
   clouds and two agent frameworks, one shape.
 - Cloud Run is the outlier on every structural row, and it is the only card
   carrying an error.
-- The card shape follows the serving SDK, not the cloud and not the agent
-  framework.
+- Across this mesh the shape tracks the card builder rather than the cloud. Both
+  identical cards come from frameworks that delegate to a2a-sdk; the outlier
+  builds its own. Whether the framework matters independently of that is not
+  separable here, because no framework appears on two SDKs.
 - The two SDKs declare `protocolVersion` in opposite places, and the `0.3` on
   the two hybrid cards contradicts the 1.0 shape they carry.
 - `capabilities` differ by one key, and an absent key is not the same answer as
@@ -728,8 +777,11 @@ The field comparison produced these results:
   other two emit a human name, the agent's full system prompt and the model id.
 - Not one card declares `securitySchemes`, though all three reject
   unauthenticated requests.
-- A live card changed with no version bump, and the conformance review was
-  identical on both sides of the change.
+- A redeploy changed a card from four skills to one while `version` stayed at
+  `0.0.1`, and the conformance review was identical on both sides. The cause was
+  a Cloud Run revision created between the two readings, not a card mutating on
+  its own; the point is that `version` does not track content, so a client
+  cannot use it to tell whether a cached card is current.
 
 Discovery is privileged differently on each cloud, and the range is wide. Cloud
 Run gates the card behind an invoker role. AgentCore makes discovery a
@@ -738,8 +790,23 @@ platform, so the card is readable only by the single federated identity the app
 registration trusts, and a client must already hold the credential before it can
 read the document describing which credential to use.
 
-Cards change without notice and without a version bump, so every result in this
-article names the date it was measured on.
+## What this does not establish
+
+One agent per runtime, one region per cloud, one tenant, and a single reading of
+each card apart from the Cloud Run series. Two SDKs and three frameworks, with
+no framework appearing on more than one SDK.
+
+So the field differences are properties of these deployments on this date. They
+are not a survey of what Cloud Run, AgentCore or Container Apps do in general,
+and the two identical cards agree because of a shared card builder rather than
+anything the clouds have in common.
+
+The field categories used throughout come from this repo's model of the spec in
+`cards/spec.py`, not from an independent conformance suite. A field sorted into
+the wrong category there would move consistently across every table here.
+
+Cards change across deploys without the `version` field moving, so every result
+in this article names the date it was measured on.
 
 The code is at
 [xbill9/multicloud-agentcard](https://github.com/xbill9/multicloud-agentcard).

@@ -192,8 +192,8 @@ must match on the suffix.
 
 ## A2A Agent Card (Container Apps / Agent Framework)
 
-The Azure agent runs on Container Apps. Fetching the card without a credential
-returns a 401:
+The Azure agent runs on Container Apps behind the platform's built-in auth.
+Fetching the card without a credential returns a 401:
 
 ```console
 $ curl -s -D - https://research-azure....azurecontainerapps.io/.well-known/agent-card.json
@@ -203,21 +203,44 @@ x-ms-middleware-request-id: a2e2bf7d-458b-4197-a9ce-fae82666d986
 ```
 
 There is no `server` header from the application. The response comes from the
-Container Apps auth middleware, configured `unauthenticatedClientAction:
-Return401`, answering on the agent's behalf.
+Container Apps auth middleware, not from the agent.
 
-Check the auth configuration:
+The request never reaches the container. Two requests, one to the card path and
+one to `/health`, both returned 401, and uvicorn logged neither:
 
 ```console
-$ az containerapp auth show -n research-azure -g research-mesh-rg
-"identityProviders": { "azureActiveDirectory": {
-    "registration": { "clientId": "be143e2d-...",
-                      "openIdIssuer": "https://sts.windows.net/40482c55-.../" },
-    "validation": { "allowedAudiences": [ "be143e2d-..." ] } } }
+$ az containerapp logs show -n research-azure -g research-mesh-rg --tail 40
+"F INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)"
 ```
 
-The Agent Framework process never receives the request, so this leg contributes
-a denial row rather than a card.
+The app is up and serving. It registers the card route through the same a2a-sdk
+helper the AWS agent uses. The 401 is interception, not absence.
+
+With a credential the card is 1,924 bytes:
+
+```json
+{
+  "name": "research_agent",
+  "description": "An agent that writes a short, sourced research brief on a given topic",
+  "supportedInterfaces": [{ "url": "https://research-azure....azurecontainerapps.io",
+                            "protocolBinding": "JSONRPC" }],
+  "version": "0.1.0",
+  "capabilities": { "streaming": false },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [{ "id": "research_brief", "name": "research brief",
+               "description": "You are a research assistant with a web_search
+                               tool...",
+               "tags": ["research","writing","analysis","brain:llm",
+                        "model:research-reasoning"] }],
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3",
+  "url": "https://research-azure....azurecontainerapps.io"
+}
+```
+
+Note the interface URL. Container Apps sits behind a platform ingress exactly as
+Cloud Run does, and this card advertises the routable public hostname.
 
 ## Debugging API Permission Errors
 
@@ -231,9 +254,36 @@ application with ID '04b07795-8ddb-461a-bbee-02f9e1bf7b46' named
 'Microsoft Azure CLI'.
 ```
 
-The workstation is signed in to the correct tenant. The Azure CLI application
-has no consent to request that audience, so opening the leg requires an admin
-consent grant or a client secret.
+The workstation is signed in to the correct tenant, so this is not a missing
+login. The app registration exposes no API scopes, has no identifier URIs and
+no pre-authorized applications, which means no user and no other application can
+obtain a token for it at all.
+
+It holds exactly one credential, and that is the whole allowlist:
+
+```console
+$ az ad app federated-credential list --id be143e2d-...
+  issuer    https://accounts.google.com
+  subject   1049501159…            <- a GCP service account numeric id
+  audiences api://AzureADTokenExchange
+```
+
+That subject is the numeric id of a GCP service account. One identity on one
+other cloud can read this agent's card.
+
+A workstation can still become that identity, because impersonation produces a
+token carrying the service account's `sub` rather than the developer's:
+
+```console
+$ gcloud auth print-identity-token \
+    --impersonate-service-account=research-coordinator@...iam.gserviceaccount.com \
+    --audiences=api://AzureADTokenExchange --include-email
+```
+
+That needs `roles/iam.serviceAccountTokenCreator` on the target. Project Owner
+is not sufficient, because Owner does not include
+`iam.serviceAccounts.getAccessToken`. Exchange the result at the Entra token
+endpoint for `<client-id>/.default` and the card returns 200.
 
 The GCP leg has a related issue. Pinning the audience is refused for a user
 account:
@@ -254,90 +304,92 @@ proves IAM role membership only, so the tool logs a warning on every fallback.
 This is the full top level field inventory across the three clouds. The spec
 groups fields into required core, 1.0 era, legacy 0.x, and optional:
 
-| category | field | Cloud Run (ADK) | AgentCore (a2a-sdk) | Container Apps |
+| category | field | Cloud Run (ADK) | AgentCore (a2a-sdk) | Container Apps (Agent Framework) |
 |---|---|---|---|---|
-| required | capabilities | yes | yes | no card |
-| required | defaultInputModes | yes | yes | no card |
-| required | defaultOutputModes | yes | yes | no card |
-| required | description | yes | yes | no card |
-| required | name | yes | yes | no card |
-| required | skills | yes | yes | no card |
-| required | version | yes | yes | no card |
-| 1.0 | supportedInterfaces | yes | yes | no card |
-| 1.0 | securityRequirements | no | no | no card |
-| legacy 0.x | url | no | yes | no card |
-| legacy 0.x | preferredTransport | no | yes | no card |
-| legacy 0.x | additionalInterfaces | no | no | no card |
-| legacy 0.x | security | no | no | no card |
-| legacy 0.x | supportsAuthenticatedExtendedCard | no | no | no card |
-| optional | protocolVersion | no | yes | no card |
-| optional | documentationUrl | no | no | no card |
-| optional | iconUrl | no | no | no card |
-| optional | provider | no | no | no card |
-| optional | securitySchemes | no | no | no card |
-| optional | signatures | no | no | no card |
+| required | capabilities | yes | yes | yes |
+| required | defaultInputModes | yes | yes | yes |
+| required | defaultOutputModes | yes | yes | yes |
+| required | description | yes | yes | yes |
+| required | name | yes | yes | yes |
+| required | skills | yes | yes | yes |
+| required | version | yes | yes | yes |
+| 1.0 | supportedInterfaces | yes | yes | yes |
+| 1.0 | securityRequirements | no | no | no |
+| legacy 0.x | url | no | yes | yes |
+| legacy 0.x | preferredTransport | no | yes | yes |
+| legacy 0.x | additionalInterfaces | no | no | no |
+| legacy 0.x | security | no | no | no |
+| legacy 0.x | supportsAuthenticatedExtendedCard | no | no | no |
+| optional | protocolVersion | no | yes | yes |
+| optional | documentationUrl | no | no | no |
+| optional | iconUrl | no | no | no |
+| optional | provider | no | no | no |
+| optional | securitySchemes | no | no | no |
+| optional | signatures | no | no | no |
 
-The Container Apps column is the honest shape of the result. Its agent answers
-401 at the platform auth middleware, so there is no card to inventory and no
-field in it can be reported either way.
+Read the last two columns again. AgentCore and Container Apps agree on every
+single row.
 
-That column is not the same as a column of noes. A no means the card was read
-and the field was absent. `no card` means nothing was read at all, and every
-field in that column is unknown rather than missing. Collapsing the two would
-turn one denial into twenty findings.
+That holds all the way down. Same `capabilities` keys, same skill keys, same
+interface keys, the same `version` string `0.1.0`, the same skill id
+`research_brief`, and the same 1,258 character skill description. The only
+differences anywhere in the two cards are the hostnames and one tag value:
+`model:us.amazon.nova-micro-v1:0` against `model:research-reasoning`.
 
-The local mesh does not fill the gap either. Its `azure` specimen runs the
-a2a-sdk reference routes rather than Agent Framework, so it is a control for the
-SDK and says nothing about what the deployed Azure runtime publishes.
+Those are two different clouds running two different agent frameworks. Strands
+on AgentCore, Microsoft Agent Framework on Container Apps. They emit
+structurally identical cards because both serve through the same a2a-sdk route
+helper.
 
-Three conclusions follow from the two columns that do carry a card.
+Cloud Run is the only column that differs, and it differs on every structural
+row.
 
 ## Required Fields - Where the Clouds Agree
 
-Both cards carry all seven required fields. Neither card is malformed, and a
-validator checking only the required set passes both.
+All three cards carry all seven required fields. None is malformed, and a
+validator checking only the required set passes all three.
 
-Every difference between these two runtimes is in optional or legacy territory.
-That is why a schema validator is not sufficient for cross cloud work, and why
-the comparison has to happen at the field level.
+Every difference between these runtimes is in optional or legacy territory. That
+is why a schema validator is not sufficient for cross cloud work, and why the
+comparison has to happen at the field level.
 
 ## The 1.0 and 0.x Split
 
 The Cloud Run card carries `supportedInterfaces` and none of the legacy keys. It
 is a clean 1.0 shape.
 
-The AgentCore card carries `supportedInterfaces` and also `url` and
-`preferredTransport`, which the 1.0 spec replaced. It is a hybrid, serving both
-generations at once.
+The AgentCore and Container Apps cards carry `supportedInterfaces` and also
+`url` and `preferredTransport`, which the 1.0 spec replaced. Both are hybrids,
+serving two generations at once.
 
-A client written for 0.x reads `url` and works against AgentCore, and finds
-nothing on Cloud Run. A client written for 1.0 reads `supportedInterfaces` and
-works against both.
+A client written for 0.x reads `url`, works against two of the three clouds, and
+finds nothing on Cloud Run. A client written for 1.0 reads `supportedInterfaces`
+and works everywhere.
 
-| client generation | Cloud Run | AgentCore |
-|---|---|---|
-| reads url | fails, key absent | works |
-| reads supportedInterfaces | works | works |
+| client generation | Cloud Run | AgentCore | Container Apps |
+|---|---|---|---|
+| reads url | fails, key absent | works | works |
+| reads supportedInterfaces | works | works | works |
 
-The hybrid card is the more compatible of the two. It is also the one that
-declares a version it does not match.
+The hybrid cards are the more compatible of the two shapes. They are also the
+ones declaring a version they do not match.
 
 ## Where is protocolVersion Declared?
 
 The two SDKs put the protocol version in opposite places:
 
-| location | Cloud Run (ADK) | AgentCore (a2a-sdk) |
-|---|---|---|
-| top level `protocolVersion` | absent | `0.3` |
-| `supportedInterfaces[].protocolVersion` | `1.0` | absent |
+| location | Cloud Run (ADK) | AgentCore | Container Apps |
+|---|---|---|---|
+| top level `protocolVersion` | absent | `0.3` | `0.3` |
+| `supportedInterfaces[].protocolVersion` | `1.0` | absent | absent |
 
 A client that reads the top level field sees nothing from Cloud Run and `0.3`
-from AgentCore. A client that reads the per interface field sees `1.0` from
-Cloud Run and nothing from AgentCore.
+from the other two. A client that reads the per interface field sees `1.0` from
+Cloud Run and nothing from the other two.
 
-Both readings are wrong in one direction each. The AgentCore card declares `0.3`
-while carrying the 1.0 `supportedInterfaces` key, so trusting the declared value
-routes a client into the wrong protocol generation.
+Both readings are wrong in one direction each. Two of the three cards declare
+`0.3` while carrying the 1.0 `supportedInterfaces` key, so trusting the declared
+value routes a client into the wrong protocol generation on two clouds.
 
 The reliable test is structural. Branch on the presence of
 `supportedInterfaces`, not on any declared version string.
@@ -346,43 +398,43 @@ The reliable test is structural. Branch on the presence of
 
 The `capabilities` object differs by one key:
 
-| capability | Cloud Run (ADK) | AgentCore (a2a-sdk) |
-|---|---|---|
-| streaming | false | false |
-| pushNotifications | false | absent |
-| stateTransitionHistory | absent | absent |
-| extensions | absent | absent |
+| capability | Cloud Run (ADK) | AgentCore | Container Apps |
+|---|---|---|---|
+| streaming | false | false | false |
+| pushNotifications | false | absent | absent |
+| stateTransitionHistory | absent | absent | absent |
+| extensions | absent | absent | absent |
 
-Cloud Run states that push notifications are unsupported. AgentCore says
+Cloud Run states that push notifications are unsupported. The other two say
 nothing.
 
 For a client these are different answers. An explicit `false` is a commitment,
-and an absent key is an unknown that a strict client has to probe or assume. Two
-agents with identical behaviour are described with different degrees of
+and an absent key is an unknown that a strict client has to probe or assume.
+Three agents with identical behaviour are described with different degrees of
 confidence.
 
 ## Skills - What Counts as a Skill?
 
-Both cards carry exactly one skill with the same four keys, and the values have
-almost nothing in common:
+All three cards carry exactly one skill with the same four keys. Two of the
+three agree on every value; the third has almost nothing in common with them:
 
-| skill field | Cloud Run (ADK) | AgentCore (a2a-sdk) |
-|---|---|---|
-| id | `research_agent` | `research_brief` |
-| name | `custom` | `research brief` |
-| description | 69 chars, the agent description | 1,258 chars, the system prompt |
-| tags | `custom_agent` | `research`, `writing`, `analysis`, `brain:llm`, `model:us.amazon.nova-micro-v1:0` |
+| skill field | Cloud Run (ADK) | AgentCore | Container Apps |
+|---|---|---|---|
+| id | `research_agent` | `research_brief` | `research_brief` |
+| name | `custom` | `research brief` | `research brief` |
+| description | 69 chars, the agent description | 1,258 chars, the system prompt | 1,258 chars, the system prompt |
+| tags | `custom_agent` | `research`, `writing`, `analysis`, `brain:llm`, `model:us.amazon.nova-micro-v1:0` | `research`, `writing`, `analysis`, `brain:llm`, `model:research-reasoning` |
 
 The `id` fields name different things. ADK uses the agent name, so the skill id
-and the agent name are the same string. AgentCore uses the capability name.
+and the agent name are the same string. The other two use the capability name.
 
 The `name` fields are not comparable at all. ADK emits the literal string
-`custom`, which is a category rather than a label. AgentCore emits a human
+`custom`, which is a category rather than a label. The other two emit a human
 readable name.
 
 The `description` fields diverge the most. ADK repeats the agent description.
-AgentCore publishes the agent's entire system prompt, 1,258 characters of
-instruction text, and the tags name the model behind it.
+The other two publish the agent's entire system prompt, 1,258 characters of
+instruction text, and their tags name the model behind it.
 
 A router selecting agents by skill description is reading a one line summary
 from one cloud and a full system prompt from the other. Ranking those by text
@@ -423,9 +475,10 @@ Six optional fields are absent from both deployed cards:
 | iconUrl | nothing to render in a catalogue |
 | signatures | nothing binds the card to the agent it describes |
 
-The first two matter most. Both agents return 401 or 403 without a credential,
-and neither card declares a security scheme. A client that discovers either
-agent learns nothing from the card about why its next request will be rejected.
+The first two matter most. All three agents reject unauthenticated requests, and
+not one card declares a security scheme. A client that discovers any of these
+agents learns nothing from the card about why its next request will be rejected.
+This is unanimous across three clouds, three frameworks and two SDKs.
 
 The absence of `signatures` means an agent card is an unauthenticated claim. Any
 party able to serve that path can assert any capability.
@@ -434,20 +487,25 @@ party able to serve that path can assert any capability.
 
 Collecting the field analysis into the decisions a client actually makes:
 
-| client decision | field it reads | Cloud Run | AgentCore | safe approach |
-|---|---|---|---|---|
-| which protocol generation | protocolVersion | absent | 0.3, incorrect | test for supportedInterfaces |
-| where to send the request | url or interfaces | 0.0.0.0:8080, unroutable | correct public URL | never route by card URL alone |
-| which transport | preferredTransport | absent | JSONRPC | read protocolBinding on the interface |
-| can it stream | capabilities.streaming | false | false | reliable |
-| can it push | capabilities.pushNotifications | false | absent | treat absent as unknown |
-| what can it do | skills[].description | one line | full system prompt | do not compare by text length |
-| how do I authenticate | securitySchemes | absent | absent | out of band knowledge required |
-| is this card genuine | signatures | absent | absent | not answerable |
+| client decision | field it reads | Cloud Run | AgentCore | Container Apps | safe approach |
+|---|---|---|---|---|---|
+| which protocol generation | protocolVersion | absent | 0.3, incorrect | 0.3, incorrect | test for supportedInterfaces |
+| where to send the request | url or interfaces | 0.0.0.0:8080, unroutable | correct public URL | correct public URL | never route by card URL alone |
+| which transport | preferredTransport | absent | JSONRPC | JSONRPC | read protocolBinding on the interface |
+| can it stream | capabilities.streaming | false | false | false | reliable |
+| can it push | capabilities.pushNotifications | false | absent | absent | treat absent as unknown |
+| what can it do | skills[].description | one line | full system prompt | full system prompt | do not compare by text length |
+| how do I authenticate | securitySchemes | absent | absent | absent | out of band knowledge required |
+| is this card genuine | signatures | absent | absent | absent | not answerable |
 
 Two of these are actively dangerous rather than merely incomplete. Routing by
-the Cloud Run card URL sends traffic to `0.0.0.0:8080`. Trusting the AgentCore
-declared protocol version selects 0.3 semantics for a 1.0 shaped card.
+the Cloud Run card URL sends traffic to `0.0.0.0:8080`. Trusting the declared
+protocol version selects 0.3 semantics for a 1.0 shaped card, on two clouds.
+
+The bind address row also settles a question the single cloud view cannot.
+Container Apps sits behind a platform ingress exactly as Cloud Run does, and it
+advertises the routable hostname. The unroutable URL is ADK's doing, not a
+consequence of being deployed behind an ingress.
 
 ## Time to Start Comparing some Cards!
 
@@ -474,27 +532,27 @@ Point the tool at a peers file and fetch the deployed agents:
 
 ```console
 $ agentcard --corpus-dir .cards-deployed fetch --peers-file peers.toml --save
-run 99f55f50b545  2/3 card(s)  24974ms
+run 23cff0f73098  3/3 card(s)  17660ms
 
   gcp    200  1.0          528B  gcloud-id-token   1 err  2 warn
   aws    200  hybrid      2109B  aws-sigv4-local   0 err  2 warn
-  azure  FAILED  authentication: 401 on /.well-known/agent-card.json
+  azure  200  hybrid      1924B  entra-fic         0 err  2 warn
 ```
 
-Two of three answered. The Azure leg stays in the corpus as a row rather than a
-gap, because a blank column reads as disagreement with every other peer, which
-is the opposite of what a denial means.
-
-The run produced six findings:
+Three clouds, three cards. The run produced seven findings:
 
 | sev | peer | code | detail |
 |---|---|---|---|
-| error | azure | no-card | 401, the Entra app has not consented to the CLI client id |
 | error | gcp | bind-address-on-card | advertises http://0.0.0.0:8080 |
 | warning | gcp | plaintext-url | http:// for a remote agent |
 | warning | gcp | undeclared-auth | fetched with a credential, names no securitySchemes |
-| warning | aws | undeclared-auth | same, on the other cloud |
+| warning | aws | undeclared-auth | same, on the second cloud |
 | warning | aws | version-shape-mismatch | declares 0.3, shaped like hybrid |
+| warning | azure | undeclared-auth | same, on the third cloud |
+| warning | azure | version-shape-mismatch | declares 0.3, shaped like hybrid |
+
+The only error belongs to one cloud. The two hybrid cards produce identical
+findings as well as identical fields.
 
 ## A Card that Changed
 
@@ -578,12 +636,14 @@ port:
 | gcp (local) | none | yes | 1 | 16 |
 | aws (local) | none | yes | 1 | 9 |
 | azure (local) | none | yes | 1 | 6 |
-| gcp (deployed) | gcloud-id-token | yes | 1 | 175 |
-| aws (deployed) | aws-sigv4-local | no | 1 | 695 |
-| azure (deployed) | none | yes | 1 | 25550 |
+| gcp (deployed) | gcloud-id-token | yes | 1 | 16785 |
+| aws (deployed) | aws-sigv4-local | no | 1 | 771 |
+| azure (deployed) | entra-fic | yes | 2 | 683 |
 
-The local mesh answers in 55 ms. The deployed run takes 25 seconds, and almost
-all of it is the Azure Container App cold starting to return a 401.
+The local mesh answers in 55 ms. The deployed run is dominated by whichever
+container is cold, and the Azure leg costs two round trips rather than one
+because the Google assertion has to be exchanged at Entra before the card can be
+requested.
 
 ## Validating the Results
 
@@ -596,9 +656,12 @@ Each result was re-checked with curl and python3, independent of the tool:
 | Both shapes reproduce when deployed | parsed the server raw bytes | confirmed |
 | Live card advertises 0.0.0.0:8080 | curl the deployed card | confirmed |
 | Neither deployed card declares auth | curl and raw bytes | confirmed |
-| capabilities differ by one key | field inventory across both cards | confirmed |
-| skill fields carry different meanings | field inventory across both cards | confirmed |
+| capabilities differ by one key | field inventory across all three cards | confirmed |
+| skill fields carry different meanings | field inventory across all three cards | confirmed |
 | skill richness is author set | same SDK, two deployments | confirmed |
+| AgentCore and Container Apps are field identical | full field inventory of both cards | confirmed |
+| The Azure app serves a card | 200 with an impersonated federated token | confirmed |
+| The Azure 401 is interception, not absence | 2 requests, 401 each, zero uvicorn log lines | confirmed |
 | A card changed with no version bump | five stored runs over 3.5 h | confirmed |
 | The review did not report the change | diff of both review outputs | identical |
 | The two gates catch different things | both run on one changed card | 0 vs 4 |
@@ -628,38 +691,52 @@ Three cards are reviewed with every server down.
 | invoke the agent and inspect | partly | no | no | model spend |
 | this harness | yes | yes | yes | zero spend |
 
-Both deployed cards are valid. Every meaningful difference between them sits in
-optional and legacy fields that a schema validator does not examine, which is
-the gap a field level comparison fills.
+All three deployed cards are valid. Every meaningful difference sits in optional
+and legacy fields that a schema validator does not examine, which is the gap a
+field level comparison fills.
+
+The three way result is sharper than a two way one. Two clouds and two agent
+frameworks produced structurally identical cards, and the third differed on
+every structural row. The card shape follows the serving SDK, not the cloud and
+not the agent framework.
 
 ## Summary
 
 The goal of this article was to fetch A2A agent cards from multiple clouds and
 compare the fields they publish. The key to the solution was storing the exact
 bytes each server returned and comparing every field at every nesting level.
-Three local specimens and three remote agents were presented, covering two A2A
-SDKs and three deployment clouds. Finally, a drift gate was added to compare
-each run against the previous stored corpus.
+Three local specimens and three remote agents were presented, covering three
+deployment clouds, three agent frameworks and two A2A SDKs. Finally, a drift
+gate was added to compare each run against the previous stored corpus.
 
 The field comparison produced these results:
 
-- Both deployed cards carry all seven required fields, so both are valid and
-  every difference sits in optional or legacy territory.
-- The AgentCore card is a hybrid, carrying the 1.0 `supportedInterfaces` and the
-  0.x `url` and `preferredTransport` together. The Cloud Run card is clean 1.0.
-- The two SDKs declare `protocolVersion` in opposite places, and the AgentCore
-  value of 0.3 contradicts the 1.0 shape of the card it appears on.
+- All three deployed cards carry the seven required fields, so all three are
+  valid and every difference sits in optional or legacy territory.
+- AgentCore and Container Apps emit structurally identical cards. Same fields,
+  same version string, same skill id, same 1,258 character description. Two
+  clouds and two agent frameworks, one shape.
+- Cloud Run is the outlier on every structural row, and it is the only card
+  carrying an error.
+- The card shape follows the serving SDK, not the cloud and not the agent
+  framework.
+- The two SDKs declare `protocolVersion` in opposite places, and the `0.3` on
+  the two hybrid cards contradicts the 1.0 shape they carry.
 - `capabilities` differ by one key, and an absent key is not the same answer as
   an explicit false.
-- The `skills` fields carry different meanings on each cloud. ADK emits the
-  literal name `custom` and a one line description, and AgentCore emits a human
-  name, a 1,258 character system prompt and the model id.
-- Card richness has two sources. Structural fields come from the SDK, and
-  descriptive fields come from the agent author.
-- Six optional fields are absent from both cards, including `securitySchemes` on
-  two agents that both require credentials, and `signatures` on both.
+- ADK emits the literal skill name `custom` and a 69 character description. The
+  other two emit a human name, the agent's full system prompt and the model id.
+- Not one card declares `securitySchemes`, though all three reject
+  unauthenticated requests.
 - A live card changed with no version bump, and the conformance review was
   identical on both sides of the change.
+
+Discovery is privileged differently on each cloud, and the range is wide. Cloud
+Run gates the card behind an invoker role. AgentCore makes discovery a
+separately grantable IAM action. Container Apps intercepts every path at the
+platform, so the card is readable only by the single federated identity the app
+registration trusts, and a client must already hold the credential before it can
+read the document describing which credential to use.
 
 Cards change without notice and without a version bump, so every result in this
 article names the date it was measured on.

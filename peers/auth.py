@@ -231,10 +231,21 @@ class GcloudIdentity:
         executable: str | None = None,
         timeout_s: float = 30.0,
         account: str | None = None,
+        impersonate: str | None = None,
     ) -> None:
         self._executable = executable or os.getenv("GCLOUD_BINARY", "gcloud")
         self._timeout_s = timeout_s
         self._account = account or os.getenv("GCLOUD_ACCOUNT")
+        # Impersonation is what makes the *federated* legs reachable from a
+        # workstation. Entra and AWS both pin the assertion's ``sub`` to the
+        # coordinator service account's immutable numeric id, so a developer's
+        # own token can never satisfy them however many roles it carries. A
+        # token minted *as* that service account carries its ``sub`` and does.
+        #
+        # Needs ``roles/iam.serviceAccountTokenCreator`` on the target. Note
+        # that Owner does not include ``iam.serviceAccounts.getAccessToken``,
+        # so being project Owner is not sufficient on its own.
+        self._impersonate = impersonate or os.getenv("GCLOUD_IMPERSONATE")
         self._cache: dict[str, _CachedToken] = {}
 
     async def _run(self, args: list[str]) -> tuple[int, str, str]:
@@ -262,6 +273,14 @@ class GcloudIdentity:
         base = ["auth", "print-identity-token"]
         if self._account:
             base.append(f"--account={self._account}")
+        if self._impersonate:
+            # A service account can pin the audience, unlike a user account, so
+            # the --audiences attempt below succeeds here rather than falling
+            # back. --include-email is the same rule as format=full on the
+            # metadata mint: without it the email claim is trimmed and trust
+            # conditions that read it stop matching, with no error saying so.
+            base.append(f"--impersonate-service-account={self._impersonate}")
+            base.append("--include-email")
 
         try:
             code, token, err = await self._run([*base, f"--audiences={audience}"])
@@ -1024,12 +1043,17 @@ def credentials_for(
             identity=identity,
         )
 
+    # An impersonated service-account token is the only assertion a workstation
+    # can produce that a Federated Identity Credential will accept, because the
+    # FIC pins `sub` to that account's numeric id. Configure it per peer with
+    # <NAME>_A2A_IMPERSONATE and the federated leg works off a laptop unchanged.
+    impersonate = os.getenv(f"{prefix}_A2A_IMPERSONATE")
     return EntraFederatedAuth(
         tenant_id=_require(peer, mode, f"{prefix}_A2A_TENANT_ID"),
         client_id=_require(peer, mode, f"{prefix}_A2A_CLIENT_ID"),
         scope=os.getenv(f"{prefix}_A2A_SCOPE")
         or f"{_require(peer, mode, f'{prefix}_A2A_CLIENT_ID')}/.default",
-        identity=identity,
+        identity=GcloudIdentity(impersonate=impersonate) if impersonate else identity,
     )
 
 

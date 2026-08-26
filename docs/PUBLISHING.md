@@ -68,6 +68,26 @@ and takes `<figcaption>` as the caption. The **first image in the body becomes
 the story's cover**, which is why the header image is the first line after the
 title. Alt text survives the import and is worth writing.
 
+## Posting to dev.to
+
+The dev.to API takes the markdown directly, so no image rendering is involved:
+
+```bash
+curl -X POST https://dev.to/api/articles \
+  -H "api-key: $(cat ~/.devto.key)" -H "Content-Type: application/json" \
+  --data-binary @article.json
+```
+
+**Use curl, not a bare Python client.** Measured 2026-08-26: the identical
+payload returned a bodyless `403` from `urllib` and `201` from `curl`. It is not
+permissions, payload shape or content -- it is the User-Agent, and
+`Python-urllib/3.13` is refused. Four attempts were spent bisecting fields and
+body size before the client turned out to be the variable. Set a real
+User-Agent or shell out to curl.
+
+The `403` carries no body and no `cf-*` headers, so nothing in the response
+says what was rejected.
+
 ## Image URLs
 
 Image references in `medium-draft.md` are absolute

@@ -68,6 +68,23 @@ and takes `<figcaption>` as the caption. The **first image in the body becomes
 the story's cover**, which is why the header image is the first line after the
 title. Alt text survives the import and is worth writing.
 
+## The two dev.to variants
+
+| file | venue | angle |
+|---|---|---|
+| `devto-draft.md` | dev.to, personal | the three way comparison, no cloud favoured |
+| `devto-aws-draft.md` | dev.to, AWS Community Builders | the same measurements led from AgentCore |
+
+Same numbers, different lead. The AWS variant opens on `GetAgentCard` being a
+separate IAM action and on the card living beneath `/invocations/`, both of
+which are AgentCore-specific and cost time to meet the hard way. It also states
+plainly that the AgentCore card publishes the agent's full system prompt and
+model id, which is the thing an AWS reader most needs to know before shipping.
+
+Post to an organization by passing `organization_id` in the article payload.
+AWS Community Builders is `2794`; the id is at
+`https://dev.to/api/organizations/<slug>`.
+
 ## Posting to dev.to
 
 The dev.to API takes the markdown directly, so no image rendering is involved:

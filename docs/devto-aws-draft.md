@@ -185,8 +185,10 @@ anywhere are the hostnames and one tag value.
 Those are two different clouds running two different agent frameworks, Strands
 on AgentCore and Microsoft Agent Framework on Container Apps. They emit
 structurally identical cards because both serve through the same a2a-sdk route
-helper. **The card shape follows the serving SDK, not the cloud and not the
-agent framework.**
+helper, while ADK builds its own. **Across this mesh the card shape tracks the
+card builder, not the cloud.** Two frameworks that delegate agreeing does not
+show the framework is irrelevant, since neither is doing the work; separating
+them would need one framework across two SDKs, and this mesh has none.
 
 ## The AgentCore Card is the More Compatible One
 
@@ -293,9 +295,20 @@ change? Five runs of the Cloud Run peer over three and a half hours:
 | 07f23fc6df3f | 17:17:39 | 0.0.1 | 1 | 528 |
 | 6dedd20d0b05 | 17:40:46 | 0.0.1 | 1 | 528 |
 
-The card lost three of its four skills and the `version` field did not move. The
-conformance review is identical on both sides of the change, so a checker that
-asks only whether a card is valid reports no difference.
+The card lost three of its four skills and the `version` field did not move.
+
+The cause is a deployment. `gcloud run revisions list` shows revision
+`research-gcp-00020-6hd` created at 17:08:19, between the last four skill
+reading and the first one skill reading, with the revision before it eleven days
+old. The agent was redeployed with different composition, which is ordinary.
+
+So this is not a card mutating on its own. What it does show is narrower and
+still worth having: a redeploy changed the card materially while `version`
+stayed at `0.0.1`, so a client cannot use that field to decide whether a card it
+cached is still current. The conformance review is identical on both sides of
+the change, so a checker that asks only whether a card is valid reports no
+difference either. Match any drift against the platform's own deployment history
+before calling it more than a change.
 
 Conformance and change are different questions, so they get different exit
 codes. `--fail-on-defect` exits 2 and `--fail-on-change` exits 4.
@@ -323,7 +336,13 @@ The AgentCore results were:
 - It advertises a routable public endpoint, and it carries none of the run's
   errors.
 - It is field identical to the same agent on Azure Container Apps, because both
-  serve through a2a-sdk. The card shape follows the serving SDK, not the cloud.
+  delegate card construction to a2a-sdk. Across this mesh the shape tracks the
+  card builder rather than the cloud.
 
-Cards change without notice and without a version bump, so every result in this
-article names the date it was measured on.
+One agent per runtime, one region per cloud, one tenant, and a single reading of
+each card apart from the Cloud Run series. These are properties of these
+deployments on this date rather than a survey of what the three runtimes do in
+general.
+
+Cards change across deploys without the `version` field moving, so every result
+in this article names the date it was measured on.

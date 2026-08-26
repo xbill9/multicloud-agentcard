@@ -109,6 +109,33 @@ Four behaviours, measured 2026-08-26:
   its own markdown from raw.githubusercontent. The content has to be embedded in
   the injected script.
 
+### What its publish validator rejects
+
+Builder Center runs a validator before it will publish. It reported four broken
+links, one malicious link and profanity on the first attempt, none of which name
+the offending text. What each turned out to be, measured 2026-08-26:
+
+- **Broken links** were every bare URL in the prose that does not resolve on its
+  own: `https://bedrock-agentcore.us-west-2.amazonaws.com` as a bare host, and
+  the truncated `https://bedrock-agentcore...` used as a placeholder in the
+  quoted card. The validator reads URLs out of the text, not just out of
+  anchors, so a URL inside a code block counts too.
+- **Malicious link** was `http://0.0.0.0:8080`. Writing the bind address with a
+  scheme makes it a URL, and `0.0.0.0` is on the address blocklists URL scanners
+  use. Written as `0.0.0.0:8080` it is prose and passes.
+- **Profanity** was a substring match. The article contained `analysis` in a
+  quoted tag list and `assistant` in a quoted system prompt. Both are the
+  classic Scunthorpe false positives, `anal` and `ass`. Neither word was needed:
+  the tag list was illustrative, and the prompt is better shown as
+  `<the full system prompt, 1,258 chars>` anyway.
+
+The fix for all of it is to keep placeholder URLs out of prose and code, and to
+write example addresses without a scheme. After it, the body contained one real
+link and the validator passed.
+
+The description also draws an SEO warning above 160 characters, separately from
+its own 512 limit.
+
 Count headings and tables after pasting. Both are cheap to check and both catch
 the merge.
 

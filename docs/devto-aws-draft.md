@@ -1,7 +1,7 @@
 ---
 title: What Bedrock AgentCore Actually Puts on Your A2A Agent Card
 published: false
-description: Fetching the agent card from a Strands agent on Bedrock AgentCore and comparing it field by field against Cloud Run and Azure Container Apps. Discovery is its own IAM action, the card lives under the invocation path, and it publishes your system prompt.
+description: The agent card a Strands agent publishes on Bedrock AgentCore, compared field by field against Cloud Run and Azure Container Apps.
 tags: aws, bedrock, a2a, aiagents
 cover_image: https://raw.githubusercontent.com/xbill9/multicloud-agentcard/master/docs/article-header.jpg
 ---
@@ -63,7 +63,7 @@ AgentCore has no per-agent hostname. The runtime is addressed by URL escaped
 ARN, and the card sits beneath the same `/invocations/` path the calls use:
 
 ```
-https://bedrock-agentcore.us-west-2.amazonaws.com
+bedrock-agentcore.us-west-2.amazonaws.com
   /runtimes/arn%3Aaws%3Abedrock-agentcore%3A...%3Aruntime%2Fresearch_aws-...
   /invocations/.well-known/agent-card.json
 ```
@@ -125,14 +125,13 @@ Here is the card:
   "name": "research_agent",
   "preferredTransport": "JSONRPC",
   "protocolVersion": "0.3",
-  "skills": [{ "description": "You are a research assistant with a
-                               web_search tool...",
+  "skills": [{ "description": "<the agent's full system prompt, 1,258 chars>",
                "id": "research_brief", "name": "research brief",
-               "tags": ["research","writing","analysis","brain:llm",
+               "tags": ["research","writing","brain:llm",
                         "model:us.amazon.nova-micro-v1:0"] }],
   "supportedInterfaces": [{ "protocolBinding": "JSONRPC",
-                            "url": "https://bedrock-agentcore..." }],
-  "url": "https://bedrock-agentcore...",
+                            "url": "<the runtime invocations endpoint>" }],
+  "url": "<the runtime invocations endpoint>",
   "version": "0.1.0"
 }
 ```
@@ -232,7 +231,7 @@ The run produced seven findings and not one of them is AgentCore's:
 
 | sev | peer | code | detail |
 |---|---|---|---|
-| error | gcp | bind-address-on-card | advertises http://0.0.0.0:8080 |
+| error | gcp | bind-address-on-card | advertises the bind address `0.0.0.0:8080` |
 | warning | gcp | plaintext-url | http:// for a remote agent |
 | warning | gcp | undeclared-auth | names no securitySchemes |
 | warning | aws | undeclared-auth | names no securitySchemes |
@@ -241,8 +240,8 @@ The run produced seven findings and not one of them is AgentCore's:
 | warning | azure | version-shape-mismatch | declares 0.3, shaped like hybrid |
 
 The only error belongs to Cloud Run. ADK's `to_a2a()` writes its bind address
-onto the card, so a public HTTPS endpoint advertises `http://0.0.0.0:8080` to
-every client that routes by card URL.
+onto the card, so a public HTTPS endpoint advertises `0.0.0.0:8080` over plain
+http to every client that routes by card URL.
 
 AgentCore advertises its real, routable endpoint. So does Container Apps. Both
 sit behind a platform ingress, which settles that the unroutable URL is ADK's

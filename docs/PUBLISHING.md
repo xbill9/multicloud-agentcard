@@ -85,6 +85,33 @@ Post to an organization by passing `organization_id` in the article payload.
 AWS Community Builders is `2794`; the id is at
 `https://dev.to/api/organizations/<slug>`.
 
+## Posting to AWS Builder Center
+
+`builder.aws.com` has no import and no API. The body is a rich text editor, but
+it **parses markdown on paste**, so the whole article can go in as one paste
+rather than being retyped. Headings, tables, inline code and fenced code blocks
+all convert, and a fenced block becomes an editable code widget with syntax
+highlighting.
+
+Four behaviours, measured 2026-08-26:
+
+- **Paste the whole body in one go.** A heading at the start of a second paste
+  is merged into the trailing paragraph of the first and arrives as plain text,
+  not a heading. It happens silently and only shows up in a heading count.
+- **The editor ignores programmatic edits.** `execCommand('delete')`, DOM
+  removal and synthetic selections do not stick; only real key events do. Fixing
+  the merged heading needed a click, `shift+End`, `Delete`, `Return`, then
+  typing `## ` and the title, which the editor's markdown shortcut converts.
+- **A stray click inside a code block opens its editor modal**, and a
+  `ctrl+a` after that clears the modal rather than the document. Position the
+  caret through the DOM and only use real keys for the edit itself.
+- **CSP blocks outbound `fetch` and `XMLHttpRequest`**, so the page cannot pull
+  its own markdown from raw.githubusercontent. The content has to be embedded in
+  the injected script.
+
+Count headings and tables after pasting. Both are cheap to check and both catch
+the merge.
+
 ## Posting to dev.to
 
 The dev.to API takes the markdown directly, so no image rendering is involved:

@@ -53,37 +53,54 @@ answer to "what do these runtimes have in common", which is also worth having.
 
 ### The deployed three, measured 2026-08-25
 
-Two of them, from a workstation, with the third recorded as a denial row. The
-gap below turned out to be narrower than it read: only the *federated* path
-needs a metadata server, and two of the three clouds will accept a credential a
-laptop can already produce. See **Reaching the deployed three** for what that
-does and does not prove.
+All three, from a workstation. The gap below turned out to be narrower than it
+read: only the *workload* mint needs a metadata server, and all three clouds
+will accept a credential a laptop can produce. See **Reaching the deployed
+three** for what that does and does not prove.
 
 ```
-run 8c201b95f349  2/3 card(s)  5126ms
+run 23cff0f73098  3/3 card(s)  17660ms
 
-  gcp    200  1.0         1533B  gcloud-id-token   1 err  2 warn
+  gcp    200  1.0          528B  gcloud-id-token   1 err  2 warn
   aws    200  hybrid      2109B  aws-sigv4-local   0 err  2 warn
-  azure  FAILED  authentication: 401 on /.well-known/agent-card.json
+  azure  200  hybrid      1924B  entra-fic         0 err  2 warn
 ```
 
 The full report is `docs/deployed-2026-08-25.md`, the findings are written up in
 `docs/DISCOVERY-FINDINGS.md`, and `docs/ARTICLE.md` is the write-up of the whole
-run. The headline: **the two shapes reported
-above off the local specimens reproduce on the deployed pair** — Cloud Run/ADK
-serves a 1.0-shaped card, AgentCore a hybrid one declaring `0.3` — and ADK's
-`0.0.0.0:8080` bind address is still on the live card.
+run. Three headlines:
+
+- **Both shapes reported above off the local specimens reproduce when
+  deployed.** Cloud Run/ADK serves a 1.0-shaped card; AgentCore and Container
+  Apps serve hybrids declaring `0.3`. ADK's `0.0.0.0:8080` bind address is
+  still on the live card, and it is the only error in the run.
+- **AgentCore and Container Apps are field-identical.** Every top-level key,
+  every skill key, the same `version` `0.1.0`, the same skill id, the same
+  1,258-character skill description. The only differences anywhere in the two
+  cards are the two hostnames and one tag value. Two clouds and two agent
+  frameworks, one shape — because both frameworks hand card construction to the
+  same `a2a-sdk` route helper, which is what the shape tracks. Nothing here
+  separates the framework from the SDK: no framework in this mesh appears on
+  two SDKs.
+- **That gcp card is 528B; the same peer served 1533B at 14:10 the same day**,
+  with `version` unmoved at `0.0.1`. A Cloud Run revision created between the
+  two readings is the cause; `docs/ARTICLE.md` has the series.
 
 ### What has *still* not been measured
 
-**The Azure leg.** Container Apps returns 401 and its Entra app registration
-has not consented to the Azure CLI's client id, so `az account get-access-token`
-against it fails `AADSTS65001` before any card is fetched. It stays in the
-corpus as a denial row rather than a blank column.
+**The workload mint.** Nothing here has fetched a card using the
+metadata-server credentials the deployed coordinator actually uses. Every
+reading above was taken in a workstation mode, and the report names that mode on
+every row so the two can never be read as one result.
 
-**Anything through the federated path.** Nothing here has yet fetched a card
-using the workload credentials the deployed coordinator actually uses, so no
-claim in this repo tests those trust policies.
+**The AWS role trust policy.** `aws-sigv4-local` reads keys off the disk and
+signs with them, so it proves the caller holds
+`bedrock-agentcore:GetAgentCard` and proves nothing about
+`AssumeRoleWithWebIdentity` or the conditions on that role.
+
+The Entra credential is the one trust policy a workstation does exercise: the
+FIC pins `sub` to a service account's numeric id, and impersonation produces a
+token carrying exactly that subject.
 
 ---
 
@@ -112,9 +129,9 @@ The two gates catch opposite things and neither substitutes for the other. A
 **defect** is a card that is wrong now. **Drift** is a card that differs from
 the one this project last read — and a runtime moving `0.3` to `1.0` between
 two deploys, with every check still green, is the event `CLAUDE.md` says this
-repo exists to catch. Measured: change a specimen's advertised URL and
-`--fail-on-defect` exits `0` while `--fail-on-change` exits `4` and names the
-fields.
+repo exists to catch. Measured, and re-run 2026-08-27: change a specimen's
+advertised URL and `--fail-on-defect` exits `0` while `--fail-on-change` exits
+`4` and names the fields.
 
 Drift is measured against the **last saved run**, so `--save` accepts the
 current cards as the new baseline. Without it the same drift is re-reported
@@ -231,12 +248,15 @@ cards/     fetch -> review -> compare -> report
 agents/    two a2a-sdk specimens and one ADK specimen, locally, as the control
 ```
 
-**The credential is attached to the httpx client, not to a request.** Discovery
-is privileged separately from invocation on all three clouds — on AWS it is
-literally a different IAM action, `bedrock-agentcore:GetAgentCard` — so a card
-fetch that carries no credential 403s while the call it was preparing for would
-have succeeded. That failure surfaces as a transport or protocol error, nowhere
-near auth. See `docs/DISCOVERY-FINDINGS.md`.
+**The credential is attached to the httpx client, not to a request.** The card
+fetch has to be authenticated in its own right, not as a side effect of the call
+it is preparing for. On AgentCore that is literal — `GetAgentCard` is a separate
+IAM action from `InvokeAgentRuntime` — so a policy granting only the second
+denies the card fetch while the call it was preparing for would have succeeded,
+and the denial surfaces as a transport or protocol error nowhere near auth.
+Cloud Run and Container Apps do not separate the two (see **Reaching the
+deployed three**); the seam is written to the strictest of the three. See
+`docs/DISCOVERY-FINDINGS.md`.
 
 **Two local stacks, on purpose.** ADK's `to_a2a()` builds its own app and its
 own card with no way to say what goes on it; the other two sit on the a2a-sdk
@@ -256,9 +276,10 @@ so the defects stay findable, not so the notes can be filtered away.
 
 ## Reaching the deployed three
 
-Open, and the honest state of it. The three agents answer 401/403 to anyone
-without a federated credential — that is the deployment, and it is the point.
-The parent reaches them from a coordinator on Cloud Run:
+Open, and the honest state of it. The three agents answer 403, 403 and 401 to
+anyone without a credential — measured 2026-08-25, re-checked 2026-08-27 — and
+that is the deployment, not an accident of it. The parent reaches them from a
+coordinator on Cloud Run:
 
 | leg | mechanism |
 |---|---|
@@ -271,15 +292,15 @@ server, and a workstation has none.
 
 ### What a workstation can already reach (2026-08-25)
 
-Two of the three, with two modes added for it. Both are **weaker measurements**
-than the federated path and the report names the mode on every row so the two
+All three, with three modes added for them. Each is a **weaker measurement**
+than the workload path, and the report names the mode on every row so the two
 can never be read as the same result.
 
 | leg | workstation mode | what it proves | what it does not |
 |---|---|---|---|
 | → GCP | `gcloud-id-token` | the developer has `roles/run.invoker` | nothing about the coordinator's service account |
 | → AWS | `aws-sigv4-local` | `~/.aws/credentials` has `bedrock-agentcore:GetAgentCard` | nothing about the role trust policy |
-| → Azure | — | — | 401; see below |
+| → Azure | `entra-fic` + `<NAME>_A2A_IMPERSONATE` | the FIC's subject condition accepts that service account | nothing about the mint the assertion normally comes from |
 
 ```bash
 agentcard fetch --peers-file peers.toml --save     # peers.toml is gitignored
@@ -302,24 +323,49 @@ swaps only the origin of the key. It is deliberately **not** in `KEYLESS_MODES`:
 it mints nothing, so it looks keyless, but what it reads off the disk is very
 often a static access key and it cannot tell which it got.
 
-**Azure is still shut.** Its Container App is configured
-`unauthenticatedClientAction: Return401` against app registration
-`be143e2d-…`, and minting a token for that audience from the CLI fails
-`AADSTS65001: the user or administrator has not consented`. Opening it means an
-admin consent grant on someone's tenant, or a client secret — the one mode in
-this repo that is not keyless. Neither is a thing to do quietly, so the leg
-stays a denial row.
+**Azure took an impersonation to open, and stayed keyless.** Its Container App
+is configured `unauthenticatedClientAction: Return401` against app registration
+`be143e2d-…`. That registration exposes no API scopes and pre-authorizes no
+application, so minting a token for it as a user fails `AADSTS65001: the user or
+administrator has not consented` — and it holds exactly one federated
+credential, which is the whole allowlist:
 
-Two ways forward for the *federated* path, and they are not equivalent:
+```
+issuer     https://accounts.google.com
+subject    1049501159…              <- a GCP service account's numeric id
+audiences  api://AzureADTokenExchange
+```
+
+One identity, on one other cloud, can read this agent's card. A workstation can
+still *become* that identity, because impersonation produces a token carrying
+the service account's `sub` rather than the developer's:
+
+```bash
+gcloud auth print-identity-token \
+  --impersonate-service-account=research-coordinator@…iam.gserviceaccount.com \
+  --audiences=api://AzureADTokenExchange --include-email
+```
+
+That needs `roles/iam.serviceAccountTokenCreator` on the target account. Project
+Owner is **not** sufficient — Owner does not carry
+`iam.serviceAccounts.getAccessToken`. Set `<NAME>_A2A_IMPERSONATE` and
+`credentials_for` wires that identity into `EntraFederatedAuth`, which exchanges
+the assertion at Entra for `<client-id>/.default` unchanged. The card comes back
+200, 1,924 bytes, two round trips. No client secret, so the leg stays in
+`KEYLESS_MODES` honestly.
+
+Two ways to the *workload* path, and they are not equivalent:
 
 1. **Run `agentcard fetch` on Cloud Run**, as the parent's coordinator does.
    Unchanged credentials, unchanged trust policies, and the cards it fetches
-   are the ones a real caller sees.
-2. **Impersonate the coordinator's service account locally.** Faster, and it
-   changes what is being measured: the trust conditions on the AWS and Entra
-   legs pin the *subject* to that service account's immutable numeric ID, so an
-   impersonated token may satisfy them while a developer's own token cannot.
-   Whatever comes back must be labelled as fetched under impersonation.
+   are the ones a real caller sees. Not yet done.
+2. **Impersonate the coordinator's service account locally**, which is what the
+   Azure leg above does. Faster, and it changes what is being measured: the
+   trust conditions on the AWS and Entra legs pin the *subject* to that service
+   account's immutable numeric ID, so an impersonated token satisfies them where
+   a developer's own cannot. Whatever comes back must be labelled as fetched
+   under impersonation — which is why `entra-fic` is printed on the azure row of
+   every report.
 
 Either way `peers/auth.py` needs no change. `credentials_for` already takes an
 explicit mode so a peers file can configure this per peer.

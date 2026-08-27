@@ -24,8 +24,20 @@ now checks that its own process survived.
 
 The rule has a second half here that the parent did not need. **A finding
 about a vendor's card must name the date and the version it was measured on.**
-Cards change without notice and without a version bump; a claim about one that
-does not say when it was true is a claim that quietly becomes false.
+A card changes materially while `version` stays put — measured 2026-08-25, when
+the Cloud Run card went from four skills to one and `version` did not move off
+`0.0.1` — so the field does not track the content, and a claim that does not
+say when it was true is a claim that quietly becomes false.
+
+**Match any drift against the platform's own deployment history before calling
+it more than a change.** That series reads as a card mutating on
+its own until `gcloud run revisions list` names the revision created between the
+two readings. A corpus sees the change; only the platform explains it.
+
+**A transcript in a document is the command's real output, re-run.** Not its
+summary, not the part of it that made the point. A `diff` printed with
+nothing under it, when the command as written exits 1, is a claim any reader
+falsifies in one paste.
 
 And the parent's most expensive lesson, unchanged: **work that is deployed but
 not committed does not exist.**
@@ -102,16 +114,36 @@ One thing changed, and it is the shape of the fork. The parent ran on Cloud
 Run, which can mint workload OIDC tokens for an arbitrary audience. **This is a
 CLI on a laptop, and a laptop has no metadata server.** `credentials_for` now
 takes an explicit `mode` so a peers file can configure two peers that want the
-same mode with different parameters — but the mint itself is unchanged, and
-running `agentcard fetch` against the deployed three from a workstation still
-needs an identity those clouds trust. That gap is open and the README says so.
+same mode with different parameters. The mint itself is unchanged, and on
+2026-08-25 all three deployed cards were fetched from this workstation:
+`gcloud-id-token`, `aws-sigv4-local`, and `entra-fic` over an impersonated
+service-account assertion (`<NAME>_A2A_IMPERSONATE`).
 
-## Discovery is privileged separately from invocation
+What that does *not* reach is the workload mint the deployed coordinator uses,
+or the AWS role trust policy, which `aws-sigv4-local` steps around by reading
+keys off the disk. The Entra FIC is the one trust policy a workstation does
+exercise, because it pins `sub` to a service account's numeric id and
+impersonation produces exactly that subject. The README keeps the state of each
+leg.
 
-On all three clouds. On AWS it is literally a different IAM action,
-`bedrock-agentcore:GetAgentCard`. This is why the credential is attached to the
-httpx **client** and not to one request, and it is the reason a card fetch can
-403 while the call it was preparing for would have succeeded — a failure that
-surfaces as a transport or protocol error, nowhere near auth.
+## Discovery is privileged separately from invocation — on one cloud of three
+
+Measured 2026-08-25, and the three answers do not resemble each other:
+
+- **Bedrock AgentCore** — `bedrock-agentcore:GetAgentCard`, a distinct IAM
+  action. Discovery is grantable without invocation.
+- **Cloud Run** — `roles/run.invoker` gates the card, and that role also
+  invokes.
+- **Container Apps** — platform auth intercepts every path ahead of the
+  container, and is not configured per path here.
+
+Only AgentCore separates them, and it is the one that produces a confusing
+failure: a policy granting only `InvokeAgentRuntime` denies the card fetch, and
+the denial surfaces as a transport or protocol error, nowhere near auth.
+
+This is why the credential is attached to the httpx **client** and not to one
+request. The card fetch has to be authenticated in its own right rather than as
+a side effect of the call it is preparing for, and the seam is written to the
+strictest of the three.
 
 In this repo that stops being an aside and becomes the whole subject.
